@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<!--
+  Warrior Trading Momentum Algo Front Desk
+  Ross Cameron style — Full connected dashboard
+  TradingView Lightweight Charts + Polygon.io WebSocket + Vanilla JS
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Warrior Trading — Momentum Algo Front Desk</title>
+
+  <!-- Custom styles (dark theme, layout, components) -->
+  <link rel="stylesheet" href="styles/custom.css">
+
+  <!-- TradingView Lightweight Charts (must load before chart modules) -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MAIN 3-COLUMN GRID
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ── LEFT COLUMN: Scanners ─────────────────────────────────────────── -->
+  <div id="col-left">
+
+    <!-- Scanner 1: Day Trade Dash -->
+    <div class="panel scanner-panel" id="scanner-daytrade">
+      <div class="loading">Loading Day Trade Dash…</div>
+    </div>
+
+    <!-- Scanner 2: Small Cap High of Day Momentum -->
+    <div class="panel scanner-panel" id="scanner-highmomentum">
+      <div class="loading">Loading Small Cap Momentum…</div>
+    </div>
+
+    <!-- Scanner 3: Low Float Top Gainers -->
+    <div class="panel scanner-panel" id="scanner-lowfloat">
+      <div class="loading">Loading Low Float Gainers…</div>
+    </div>
+
+  </div><!-- /col-left -->
+
+  <!-- ── CENTER COLUMN: Stock Quote + 5 Pillars ───────────────────────── -->
+  <div id="col-center">
+    <div class="panel" id="panel-quote">
+      <div class="quote-empty">
+        <div class="quote-empty-icon">📈</div>
+        <div>Click any scanner row to load a stock</div>
+      </div>
+    </div>
+  </div><!-- /col-center -->
+
+  <!-- ── RIGHT COLUMN: Four TradingView Charts (2×2) ──────────────────── -->
+  <div id="col-right">
+
+    <!-- Chart 1: Intraday Momentum (Top-Left) — Master crosshair -->
+    <div class="panel chart-panel">
+      <div class="chart-header">
+        <span class="chart-title">Intraday Momentum</span>
+        <div class="chart-tabs">
+          <button class="tab-btn active" onclick="setChartTab(this, 'intradayMomentum', '1m')">1m</button>
+          <button class="tab-btn"        onclick="setChartTab(this, 'intradayMomentum', '5m')">5m</button>
+        </div>
+        <button class="btn-refresh" onclick="refreshChart('intradayMomentum')">&#x21bb;</button>
+      </div>
+      <div class="chart-container" id="chart-intraday-momentum"></div>
+    </div>
+
+    <!-- Chart 2: Scalping Fast (Top-Right) -->
+    <div class="panel chart-panel">
+      <div class="chart-header">
+        <span class="chart-title">Scalping Fast</span>
+        <div class="chart-tabs">
+          <button class="tab-btn active" onclick="setChartTab(this, 'scalpingFast', '10s')">10s</button>
+          <button class="tab-btn"        onclick="setChartTab(this, 'scalpingFast', '1m')">1m</button>
+        </div>
+        <button class="btn-refresh" onclick="refreshChart('scalpingFast')">&#x21bb;</button>
+      </div>
+      <div class="chart-container" id="chart-scalping-fast"></div>
+    </div>
+
+    <!-- Chart 3: Daily Context (Bottom-Left) -->
+    <div class="panel chart-panel">
+      <div class="chart-header">
+        <span class="chart-title">Daily Context</span>
+        <div class="chart-tabs">
+          <button class="tab-btn active" onclick="setChartTab(this, 'dailyContext', '1D')">1D</button>
+          <button class="tab-btn"        onclick="setChartTab(this, 'dailyContext', '5m')">5m</button>
+        </div>
+        <button class="btn-refresh" onclick="refreshChart('dailyContext')">&#x21bb;</button>
+      </div>
+      <div class="chart-container" id="chart-daily-context"></div>
+    </div>
+
+    <!-- Chart 4: Micro Scalping (Bottom-Right) -->
+    <div class="panel chart-panel">
+      <div class="chart-header">
+        <span class="chart-title">Micro Scalping</span>
+        <div class="chart-tabs">
+          <button class="tab-btn active" onclick="setChartTab(this, 'microScalping', '10s')">10s</button>
+        </div>
+        <button class="btn-refresh" onclick="refreshChart('microScalping')">&#x21bb;</button>
+      </div>
+      <div class="chart-container" id="chart-micro-scalping"></div>
+    </div>
+
+  </div><!-- /col-right -->
+
+</div><!-- /app -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     OVERLAYS
+════════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ON AIR overlay (bottom-left) -->
+<div id="overlay-onair" title="Ross Cameron — Warrior Trading">
+  <div class="onair-inner">
+    <div class="onair-dot"></div>
+    <div class="onair-text">ON AIR</div>
+    <div class="onair-name">WARRIOR</div>
+  </div>
+</div>
+
+<!-- SUBSCRIBED badge (bottom-right) -->
+<div id="badge-subscribed">
+  <span class="shield-icon">🛡️</span>
+  <span>SUBSCRIBED</span>
+</div>
+
+<!-- Help button -->
+<button id="btn-help" onclick="document.getElementById('modal-help').classList.add('open')" title="Trading Rules">?</button>
+
+<!-- Help modal -->
+<div id="modal-help">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('modal-help').classList.remove('open')">✕</button>
+    <h2>Warrior Trading — Chart Rules & Workflow</h2>
+
+    <h3>Core Principles</h3>
+    <ul>
+      <li>Trade only in the direction of the trend: price above 9/20/200 EMAs = bullish bias.</li>
+      <li>VWAP is dynamic support/resistance on intraday charts.</li>
+      <li>Favor pullbacks to key levels (9 EMA, 20 EMA, VWAP, +1 SD band) for entries.</li>
+      <li>Risk: tight stops below VWAP or recent low; target 2:1+ or 10%+ moves.</li>
+    </ul>
+
+    <h3>Chart Ordering — Pre-Entry</h3>
+    <ul>
+      <li>① Daily Context → confirm price above 200 EMA.</li>
+      <li>② Intraday Momentum → confirm price above VWAP + 9/20 EMAs + catalyst.</li>
+      <li>③ Scalping Fast → check for tightening setup.</li>
+    </ul>
+
+    <h3>Chart Ordering — Entry</h3>
+    <ul>
+      <li>Primary decision: Intraday Momentum — pullback to VWAP/9 EMA then reclaim.</li>
+      <li>Timing: Scalping Fast + Micro Scalping — first new high or micro pullback break.</li>
+      <li>Final confirmation: all three faster charts aligned with volume spike.</li>
+    </ul>
+
+    <h3>Scenario A — "Looking Good" ✓</h3>
+    <p>Daily above 200 EMA → Intraday pulls to VWAP/9 EMA, reclaims with volume →
+    Fast/Micro show first-candle new high on high volume → price walks up 9 EMA.</p>
+
+    <h3>Scenario B — "Getting Stopped" ✗</h3>
+    <p>Daily near 200 EMA resistance → Intraday VWAP reclaim immediately fails →
+    Fast charts show 9 EMA loss + red volume spike, no new highs → quick stop.</p>
+
+    <h3>Scenario C — Mid-Trade Warning ⚠️</h3>
+    <p>Intraday still above VWAP but hugging 9 EMA. Fast/Micro show multiple failures
+    to make new highs + volume drying up → tighten stop or exit on first 9 EMA loss.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SCRIPTS — load order matters
+     1. engine.js  — liveData, events, WebSocket client
+     2. charts.js  — TradingView chart registry + handlers
+     3. scanners.js — scanner table rendering
+     4. pillars.js  — quote panel + 5 Pillars
+     5. main.js     — init orchestration
+════════════════════════════════════════════════════════════════════════════ -->
+<script type="module">
+  import './js/engine.js';
+  import { initializeAllCharts } from './js/charts.js';
+  import { initScanners }        from './js/scanners.js';
+  import { initPillars }         from './js/pillars.js';
+
+  // Orchestrate startup
+  window.addEventListener('load', async () => {
+    initializeAllCharts();
+    initPillars();
+    await initScanners();
+  });
+
+  // ── Timeframe tab helper (called from HTML onclick) ──────────────────────
+  window.setChartTab = function(btn, chartName, timeframe) {
+    // Update active tab styling
+    const tabs = btn.closest('.chart-tabs').querySelectorAll('.tab-btn');
+    tabs.forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    // Switch the chart's timeframe
+    window.switchTimeframe(chartName, timeframe);
+  };
+
+  // ── Manual refresh button ────────────────────────────────────────────────
+  window.refreshChart = function(chartName) {
+    const ticker = window.liveData?.currentSymbol;
+    if (!ticker) return;
+    // Invalidate cache so next load is fresh
+    const tf = /* get active timeframe */ (() => {
+      const btn = document.querySelector(`.chart-panel .tab-btn.active`);
+      return btn?.textContent?.trim() || '1m';
+    })();
+    if (window.liveData.chartDataCache[ticker]) {
+      delete window.liveData.chartDataCache[ticker];
+    }
+    window.switchTimeframe(chartName, tf);
+  };
+</script>
+
+</body>
+</html>
