@@ -1,8 +1,9 @@
 // js/scanners.js
-// Three scanner panels matching Warrior Trading layout exactly:
+// Four scanner panels matching Warrior Trading layout:
 //   Scanner 1: Top Gainers            — sorted by Change%, 5-min window header
 //   Scanner 2: Small Cap High of Day  — streaming momentum alert feed, prepend newest
-//   Scanner 3: Low Float Top Gainers  — sorted by Change%, float-filtered
+//   Scanner 3: Low Float Top Gainers  — sorted by Change%, derived from scanners 1+2, float-filtered
+//   Scanner 4: Running Up             — velocity alert feed, 7 columns, prepend newest
 
 import { fetchScanners } from './engine.js';
 
@@ -15,6 +16,7 @@ const SCANNERS = [
     titleFn:     (w) => `Top Gainers: ${w.from} - ${w.to}`,
     badge:       'Online',
     sortable:    true,
+    feedMode:    false,
     columns: [
       { label: 'Change\nFrom\nClose(%)', field: 'changeFromClosePct', fmt: fmtChg,   color: true, align: 'right', width: '60px' },
       { label: 'Symbol /\nNews',         field: 'symbol',             fmt: fmtSym,   align: 'left',  width: '80px'  },
@@ -29,15 +31,16 @@ const SCANNERS = [
     containerId: 'scanner-highmomentum',
     titleFn:     () => 'Small Cap \u2013 High of Day Momentum',
     badge:       'Online',
-    sortable:    false,   // feed order — newest at top
+    sortable:    false,
+    feedMode:    true,
     columns: [
-      { label: 'Time',                   field: 'time',               fmt: v => v,   align: 'left',  width: '65px'  },
-      { label: 'Symbol /\nNews',         field: 'symbol',             fmt: fmtSym,   align: 'left',  width: '80px'  },
-      { label: 'Price',                  field: 'price',              fmt: fmtPrice, align: 'right', width: '50px'  },
-      { label: 'Volume',                 field: 'volume',             fmt: fmtVol,   align: 'right', width: '60px'  },
-      { label: 'Float',                  field: 'float',              fmt: fmtFloat, align: 'right', width: '55px'  },
-      { label: 'Relative\nVolume\n(Daily Rate)', field: 'relVolDaily', fmt: fmtX,   align: 'right', width: '45px'  },
-      { label: '5 min\n%',              field: 'relVol5min',          fmt: fmtX,     align: 'right', width: '45px'  },
+      { label: 'Time',                         field: 'time',        fmt: v => v,   align: 'left',  width: '65px'  },
+      { label: 'Symbol /\nNews',               field: 'symbol',      fmt: fmtSym,   align: 'left',  width: '80px'  },
+      { label: 'Price',                        field: 'price',       fmt: fmtPrice, align: 'right', width: '50px'  },
+      { label: 'Volume',                       field: 'volume',      fmt: fmtVol,   align: 'right', width: '60px'  },
+      { label: 'Float',                        field: 'float',       fmt: fmtFloat, align: 'right', width: '55px'  },
+      { label: 'Relative\nVolume\n(Daily Rate)',field: 'relVolDaily', fmt: fmtX,     align: 'right', width: '45px'  },
+      { label: '5 min\n%',                     field: 'relVol5min',  fmt: fmtX,     align: 'right', width: '45px'  },
     ],
   },
   {
@@ -46,6 +49,7 @@ const SCANNERS = [
     titleFn:     (w) => `Low Float Top Gainers: ${w.from} - ${w.to}`,
     badge:       'Online',
     sortable:    true,
+    feedMode:    false,
     columns: [
       { label: 'Change\nFrom\nClose(%)', field: 'changeFromClosePct', fmt: fmtChg,   color: true, align: 'right', width: '60px' },
       { label: 'Symbol /\nNews',         field: 'symbol',             fmt: fmtSym,   align: 'left',  width: '80px'  },
@@ -53,6 +57,23 @@ const SCANNERS = [
       { label: 'Volume',                 field: 'volume',             fmt: fmtVol,   align: 'right', width: '60px'  },
       { label: 'Float',                  field: 'float',              fmt: fmtFloat, align: 'right', width: '55px'  },
       { label: 'Relative\nVolume\nRate', field: 'relVolDaily',        fmt: fmtX,     align: 'right', width: '50px'  },
+    ],
+  },
+  {
+    key:         'runningUp',
+    containerId: 'scanner-runningup',
+    titleFn:     () => 'Running Up',
+    badge:       'Online',
+    sortable:    false,
+    feedMode:    true,
+    columns: [
+      { label: 'Time',                         field: 'timestamp',     fmt: fmtRunUpTime, align: 'left',  width: '80px'  },
+      { label: 'Symbol /\nNews',               field: 'symbol',        fmt: fmtSym,       align: 'left',  width: '80px'  },
+      { label: 'Price',                        field: 'price',         fmt: fmtPrice,     align: 'right', width: '50px'  },
+      { label: 'Volume',                       field: 'volume',        fmt: fmtVol,       align: 'right', width: '60px'  },
+      { label: 'Float',                        field: 'float',         fmt: fmtFloat,     align: 'right', width: '55px'  },
+      { label: 'Relative\nVolume\n(Daily)',     field: 'relVolDaily',   fmt: fmtX,         align: 'right', width: '45px'  },
+      { label: 'Rel Vol\n5 min %',             field: 'relVol5minPct', fmt: fmtX,         align: 'right', width: '45px'  },
     ],
   },
 ];
@@ -194,7 +215,7 @@ function refreshAll(data) {
 
   for (const def of SCANNERS) {
     const rows = sc[def.key] || [];
-    if (def.key === 'highMomentum') {
+    if (def.feedMode) {
       updateFeed(def, rows);
     } else {
       updateRows(def, rows, win);
@@ -206,7 +227,7 @@ window.refreshScanner = function(key) {
   const def = SCANNERS.find(d => d.key === key);
   if (!def) return;
   const rows = window.liveData.scanners?.[def.key] || [];
-  if (key === 'highMomentum') updateFeed(def, rows);
+  if (def.feedMode) updateFeed(def, rows);
   else updateRows(def, rows, currentWindow);
 };
 
@@ -256,8 +277,18 @@ function fmtChg(v) {
 }
 
 function fmtSym(v, row) {
-  const flame = (row?.relVolDaily >= 3 || row?.changeFromClosePct >= 20) ? ' 🔥' : '';
-  return `<span class="sym-text">${v}${flame}</span>`;
+  const icon = row?.newsIcon === 'flame'
+    ? ' 🔥'
+    : row?.newsIcon === 'yellowCircle'
+      ? ' 🟡'
+      : '';
+  return `<span class="sym-text">${v}${icon}</span>`;
+}
+
+function fmtRunUpTime(v, row) {
+  if (!v) return '—';
+  const freq = row?.frequencyNote ? `<br><span class="ru-freq">${row.frequencyNote}</span>` : '';
+  return `<span class="ru-time">${v}</span>${freq}`;
 }
 
 function fmtPrice(v) { return v != null ? Number(v).toFixed(2) : '—'; }

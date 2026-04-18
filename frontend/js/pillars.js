@@ -5,12 +5,25 @@
 
 // ── 5 Pillars scoring ─────────────────────────────────────────────────────────
 
+function _getRunningUpAlert(ticker) {
+  return window.liveData.scanners?.runningUp?.find(r => r.symbol === ticker) ?? null;
+}
+
 function evaluatePillars(quote, ema200) {
+  const ruAlert    = _getRunningUpAlert(quote.ticker);
+  // Momentum pillar: use Running Up 5-min relVol spike if available, else gap%
+  const momentumPass = ruAlert
+    ? (ruAlert.relVol5minPct >= 3.0 && ruAlert.delta5minVsDaily >= 0.5)
+    : quote.gapPct > 10;
+  const momentumNote = ruAlert
+    ? `5m RVOL ${Number(ruAlert.relVol5minPct).toFixed(1)}× (Δ${Number(ruAlert.delta5minVsDaily).toFixed(1)})`
+    : '> 10% gap';
+
   return {
-    lowFloat:    { pass: (quote.float > 0 && quote.float < 10_000_000), label: 'Low Float',          note: '< 10M shares' },
+    lowFloat:    { pass: (quote.float > 0 && quote.float < 10_000_000), label: 'Low Float',          note: '< 10M shares'   },
     highRelVol:  { pass: quote.relVolDaily > 5,                          label: 'High Relative Vol',  note: '> 5× daily avg' },
     catalyst:    { pass: (window.liveData.news?.length > 0),             label: 'Catalyst / News',    note: 'News today'     },
-    momentum:    { pass: quote.gapPct > 10,                              label: 'Momentum Gap',       note: '> 10% gap'      },
+    momentum:    { pass: momentumPass,                                   label: 'Momentum',           note: momentumNote     },
     strongDaily: { pass: ema200 !== null && quote.price > ema200,        label: 'Strong Daily Chart', note: 'Price > 200 EMA'},
   };
 }
@@ -35,10 +48,12 @@ function renderQuotePanel(quote, news) {
   const pillars = evaluatePillars(quote, ema200Val);
   const score   = Object.values(pillars).filter(p => p.pass).length;
 
+  const ruAlert = _getRunningUpAlert(quote.ticker);
+
   panel.innerHTML = `
     <!-- Dynamic header -->
     <div class="quote-header">
-      <div class="quote-ticker">${quote.ticker || '—'}</div>
+      <div class="quote-ticker">${quote.ticker || '—'}${ruAlert ? ' <span class="badge-running-up">&#9650; Running Up</span>' : ''}</div>
       <div class="quote-price" style="color:${chgColor}">
         $${fmtPrice(quote.price)}
         <span class="quote-change">${chgSign}${fmtPrice(change)} (${chgSign}${(changePct).toFixed(2)}%)</span>

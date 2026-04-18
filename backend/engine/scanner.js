@@ -1,24 +1,35 @@
 // engine/scanner.js
-// Three scanners matching Warrior Trading layout:
+// Four scanners matching Warrior Trading layout:
 //   dayTrade     → "Top Gainers [window] (Online)"          — sorted by Change%
 //   highMomentum → "Small Cap – High of Day Momentum"        — streaming alert feed
-//   lowFloat     → "Low Float Top Gainers [window] (Online)" — sorted, float < 20M
+//   lowFloat     → "Low Float Top Gainers [window] (Online)" — derived from dayTrade ∪ highMomentum, float < 20M
+//   runningUp    → "Running Up (Online)"                     — velocity-based alert feed, 7 columns
 //
 // Float data is fetched from Finviz and cached for the session.
 
 import { getFloat, batchGetFloats } from './float.js';
 
-const PRICE_MIN  = 0.50;
-const PRICE_MAX  = 30;
-const VOL_MIN    = 100_000;
-const FLOAT_MAX_LOW = 20_000_000;   // Low Float scanner threshold
+const PRICE_MIN      = 0.50;
+const PRICE_MAX      = 30;
+const VOL_MIN        = 100_000;
+const FLOAT_MAX_LOW  = 20_000_000;   // Low Float scanner threshold
+
+// Running Up trigger thresholds
+const RU_PRICE_ADV_PCT   = 4;     // min % price advance in look-back window
+const RU_REL_VOL_DAILY   = 2.5;   // min daily relative volume
+const RU_REL_VOL_5MIN    = 3.0;   // min 5-min relative volume
+const RU_DELTA_MIN       = 0.5;   // min positive delta (relVol5min - relVolDaily)
+const RU_LOOKBACK_MS     = 60_000; // price velocity window (60 seconds)
+const RU_FREQ_WINDOW_MS  = 5_000;  // frequency note window (5 seconds)
+const RU_MAX_ROWS        = 50;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const scanners = {
   dayTrade:     [],    // top gainers sorted by change%
   highMomentum: [],    // streaming momentum alert feed
-  lowFloat:     [],    // low-float top gainers sorted by change%
+  lowFloat:     [],    // low-float top gainers (from dayTrade ∪ highMomentum), sorted by change%
+  runningUp:    [],    // velocity-based alert feed, prepend newest
 };
 
 // Rolling 5-min window timestamps for scanner headers
@@ -28,8 +39,14 @@ const window5min = {
 };
 
 // Per-ticker session data
-const tickerMeta = {};    // { ticker: { sessionVol, avgDailyVolume, prevClose, open, float } }
-const highWatermarks = {}; // { ticker: intraday high price } — for momentum feed
+const tickerMeta = {};     // { ticker: { sessionVol, avgDailyVolume, prevClose, open, float } }
+const highWatermarks = {}; // { ticker: intraday high price } — for highMomentum feed
+
+// Price history for velocity detection (Running Up)
+const priceHistory = {};   // { ticker: [ { price, ts } ] }
+
+// Frequency tracking for Running Up "(N in Xsec)" notes
+const runUpFreq = {};      // { ticker: { count, windowStart, lastPrice } }
 
 let broadcastFn = null;
 let provider    = null;
@@ -65,7 +82,6 @@ export async function startScanning() {
       console.warn('[scanner] No symbols passed filters — using mock data');
       await _seedMockData();
     } else {
-      // Fetch floats for all symbols in parallel (rate-limited inside batchGetFloats)
       console.log(`[scanner] Fetching Finviz float for ${filtered.length} symbols…`);
       const floatMap = await batchGetFloats(filtered.map(g => g.symbol));
 
@@ -98,7 +114,6 @@ export async function startScanning() {
 
 /**
  * Called on each bar tick from server.js.
- * Checks for new intraday highs → pushes to momentum alert feed.
  * msg = { sym, c (close), av (accumulated volume) }
  */
 export function handleTick(msg) {
@@ -107,33 +122,47 @@ export function handleTick(msg) {
   if (!meta) return;
 
   const price = msg.c || 0;
+  const now   = Date.now();
   meta.sessionVol = msg.av || meta.sessionVol;
 
-  // Update the sorted scanner rows
+  // Track price history for velocity detection
+  if (!priceHistory[ticker]) priceHistory[ticker] = [];
+  priceHistory[ticker].push({ price, ts: now });
+  // Prune entries older than look-back window
+  const cutoff = now - RU_LOOKBACK_MS;
+  priceHistory[ticker] = priceHistory[ticker].filter(e => e.ts >= cutoff);
+
+  // Update sorted scanner rows
   const existing = _findRow(ticker);
   if (existing) {
     const relVolDaily        = meta.avgDailyVolume > 0 ? meta.sessionVol / meta.avgDailyVolume : 0;
     const changeFromClose    = price - (meta.prevClose || price);
     const changeFromClosePct = (meta.prevClose || 0) > 0 ? (changeFromClose / meta.prevClose) * 100 : 0;
+    const relVol5min         = _calc5minRelVol(meta);
 
     const updated = {
       ...existing,
-      time:               _etTimeStr(Date.now()),
+      time:               _etTimeStr(now),
       price:              _round(price),
       volume:             meta.sessionVol,
       relVolDaily:        _round(relVolDaily),
+      relVol5min:         _round(relVol5min),
       changeFromClose:    _round(changeFromClose),
       changeFromClosePct: _round(changeFromClosePct),
+      newsIcon:           _computeNewsIcon(relVolDaily, changeFromClosePct),
     };
     _updateRow(ticker, updated);
   }
 
-  // Momentum alert feed — trigger on new intraday high
+  // highMomentum alert feed — trigger on new intraday high
   const isNewHigh = !highWatermarks[ticker] || price > highWatermarks[ticker];
   if (isNewHigh) {
     highWatermarks[ticker] = price;
     _pushMomentumAlert(ticker, price, meta);
   }
+
+  // Running Up alert feed — velocity + volume acceleration trigger
+  _evaluateRunningUp(ticker, price, meta, now);
 
   broadcastFn?.({ type: 'scanner', data: getScanners() });
 }
@@ -150,6 +179,7 @@ export async function enrichWithFloat(ticker) {
 
 function _buildRow(time, g, float, avgVol) {
   const relVolDaily = avgVol > 0 ? (g.volume || 0) / avgVol : 0;
+  const relVol5min  = 0; // populated on first tick
   return {
     time,
     symbol:             g.symbol,
@@ -160,25 +190,25 @@ function _buildRow(time, g, float, avgVol) {
     float:              float || 0,
     avgDailyVolume:     avgVol,
     relVolDaily:        _round(relVolDaily),
+    relVol5min:         _round(relVol5min),
     gapPct:             _round(g.gapPct),
     changeFromClose:    _round(g.changeFromClose),
     changeFromClosePct: _round(g.changeFromClosePct),
-    hasNews:            false,   // set by news check if desired
+    newsIcon:           _computeNewsIcon(relVolDaily, g.changeFromClosePct || 0),
   };
 }
 
 function _updateRow(ticker, row) {
   _upsertRow(scanners.dayTrade, ticker, row);
 
+  // lowFloat is the union of dayTrade and highMomentum candidates with float < threshold
   if ((row.float > 0 && row.float <= FLOAT_MAX_LOW) || row.float === 0) {
     _upsertRow(scanners.lowFloat, ticker, row);
   } else {
-    // Remove from lowFloat if float grew above threshold
     const idx = scanners.lowFloat.findIndex(r => r.symbol === ticker);
     if (idx >= 0) scanners.lowFloat.splice(idx, 1);
   }
 
-  // Sort both by changeFromClosePct descending, cap at 20 rows
   for (const list of [scanners.dayTrade, scanners.lowFloat]) {
     list.sort((a, b) => b.changeFromClosePct - a.changeFromClosePct);
     if (list.length > 20) list.splice(20);
@@ -191,6 +221,7 @@ function _pushMomentumAlert(ticker, price, meta) {
 
   const relVolDaily = meta.avgDailyVolume > 0 ? meta.sessionVol / meta.avgDailyVolume : 0;
   const relVol5min  = _calc5minRelVol(meta);
+  const newsIcon    = _computeNewsIcon(relVolDaily, existing.changeFromClosePct || 0);
 
   const alert = {
     time:        _etTimeStr(Date.now()),
@@ -200,24 +231,100 @@ function _pushMomentumAlert(ticker, price, meta) {
     float:       meta.float || existing.float || 0,
     relVolDaily: _round(relVolDaily),
     relVol5min:  _round(relVol5min),
-    hasNews:     existing.hasNews || false,
+    newsIcon,
+    // Fields needed for lowFloat eligibility check
+    changeFromClosePct: existing.changeFromClosePct || 0,
   };
 
-  // Prepend to feed (newest at top), cap at 50
   scanners.highMomentum.unshift(alert);
   if (scanners.highMomentum.length > 50) scanners.highMomentum.pop();
+
+  // Also add to lowFloat if it qualifies (float < threshold) — per interrelationship spec
+  const float = alert.float;
+  if ((float > 0 && float <= FLOAT_MAX_LOW) || float === 0) {
+    const fullRow = scanners.dayTrade.find(r => r.symbol === ticker) || alert;
+    _upsertRow(scanners.lowFloat, ticker, { ...fullRow, newsIcon });
+    scanners.lowFloat.sort((a, b) => b.changeFromClosePct - a.changeFromClosePct);
+    if (scanners.lowFloat.length > 20) scanners.lowFloat.splice(20);
+  }
+}
+
+/**
+ * Evaluates Running Up trigger criteria for a ticker on each tick.
+ * Fires when: price up ≥ 4% in 60s window + relVolDaily ≥ 2.5 + relVol5min ≥ 3.0 + positive delta.
+ */
+function _evaluateRunningUp(ticker, price, meta, now) {
+  const history = priceHistory[ticker];
+  if (!history || history.length < 2) return;
+
+  const oldest = history[0];
+  const pricePctAdv = oldest.price > 0 ? ((price - oldest.price) / oldest.price) * 100 : 0;
+
+  if (pricePctAdv < RU_PRICE_ADV_PCT) return;
+
+  const relVolDaily = meta.avgDailyVolume > 0 ? meta.sessionVol / meta.avgDailyVolume : 0;
+  if (relVolDaily < RU_REL_VOL_DAILY) return;
+
+  const relVol5min = _calc5minRelVol(meta);
+  if (relVol5min < RU_REL_VOL_5MIN) return;
+
+  const delta = relVol5min - relVolDaily;
+  if (delta < RU_DELTA_MIN) return;
+
+  // Passed all criteria — compute frequency note
+  const freq = runUpFreq[ticker] || { count: 0, windowStart: now };
+  if (now - freq.windowStart <= RU_FREQ_WINDOW_MS) {
+    freq.count += 1;
+  } else {
+    freq.count = 1;
+    freq.windowStart = now;
+  }
+  runUpFreq[ticker] = freq;
+
+  const elapsedSec = Math.round((now - freq.windowStart) / 1000);
+  const frequencyNote = freq.count > 1 ? `(${freq.count} in ${Math.max(1, elapsedSec)}sec)` : '';
+
+  const existing = _findRow(ticker);
+  const newsIcon  = existing
+    ? _computeNewsIcon(relVolDaily, existing.changeFromClosePct || 0)
+    : _computeNewsIcon(relVolDaily, 0);
+
+  const alert = {
+    timestamp:      _etTimeStr(now),
+    frequencyNote,
+    symbol:         ticker,
+    price:          _round(price),
+    volume:         meta.sessionVol,
+    float:          meta.float || existing?.float || 0,
+    relVolDaily:    _round(relVolDaily),
+    relVol5minPct:  _round(relVol5min),
+    delta5minVsDaily: _round(delta),
+    newsIcon,
+  };
+
+  // Deduplicate: update existing row for same ticker if it fired very recently (< 3s)
+  const existingIdx = scanners.runningUp.findIndex(r => r.symbol === ticker);
+  if (existingIdx >= 0) {
+    scanners.runningUp[existingIdx] = alert;
+  } else {
+    scanners.runningUp.unshift(alert);
+    if (scanners.runningUp.length > RU_MAX_ROWS) scanners.runningUp.pop();
+  }
 }
 
 function _calc5minRelVol(meta) {
-  // 5-min rel vol = current 5-min pace vs expected 5-min avg
-  // Expected = avgDailyVolume / 78 (78 five-minute periods in a 6.5hr day)
   const avg5min = (meta.avgDailyVolume || 0) / 78;
   if (avg5min <= 0) return 0;
-  // Current 5-min volume = rough estimate from session volume pace
   const minutesSinceOpen = _minutesSinceOpen();
   if (minutesSinceOpen <= 0) return 0;
   const pace5min = (meta.sessionVol / minutesSinceOpen) * 5;
   return pace5min / avg5min;
+}
+
+function _computeNewsIcon(relVol, changePct) {
+  if (relVol >= 5 || changePct >= 30) return 'flame';
+  if (relVol >= 3 || changePct >= 15) return 'yellowCircle';
+  return null;
 }
 
 function _upsertRow(list, ticker, row) {
@@ -253,6 +360,15 @@ async function _seedMockData() {
     highWatermarks[r.symbol] = r.price;
     _updateRow(r.symbol, _buildRow(time, r, floatMap[r.symbol] || 0, r.avgDailyVolume));
   }
+
+  // Seed a few mock Running Up alerts
+  const mockRunUp = [
+    { symbol: 'WSHP', price: 32.10, relVolDaily: 4.2, relVol5minPct: 8.1, delta5minVsDaily: 3.9, float: 1_330_000, volume: 22_000_000, frequencyNote: '(2 in 3sec)', newsIcon: 'flame' },
+    { symbol: 'MYSE', price: 3.95,  relVolDaily: 3.1, relVol5minPct: 5.4, delta5minVsDaily: 2.3, float: 3_840_000, volume: 136_000_000, frequencyNote: '',           newsIcon: 'yellowCircle' },
+  ];
+  for (const r of mockRunUp) {
+    scanners.runningUp.push({ timestamp: time, ...r });
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -265,7 +381,7 @@ function _etTimeStr(ms) {
 }
 
 function _minutesSinceOpen() {
-  const now  = new Date();
+  const now   = new Date();
   const etNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const open  = new Date(etNow);
   open.setHours(9, 30, 0, 0);

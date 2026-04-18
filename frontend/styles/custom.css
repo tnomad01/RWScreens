@@ -97,6 +97,18 @@ body { background: #0a0a0a; color: #cccccc; font-size: 12px; }
 .row-flash { animation: rowFlash 0.6s ease-out; }
 .row-new   { animation: rowSlide 0.25s ease-out; }
 
+/* Running Up scanner */
+.ru-time  { font-size: 10px; color: #aaa; }
+.ru-freq  { font-size: 9px; color: #ffaa00; font-weight: 700; }
+
+/* "Running Up" alert badge in quote panel ticker line */
+.badge-running-up {
+  font-size: 9px; font-weight: 700; color: #00ff9d;
+  background: #00ff9d18; border: 1px solid #00ff9d55;
+  border-radius: 3px; padding: 1px 5px; margin-left: 8px;
+  vertical-align: middle; letter-spacing: 0.3px;
+}
+
 /* ── Center panel ─────────────────────────────────────────────────────────── */
 #col-center .panel { flex: 1 1 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #333 transparent; }
 
