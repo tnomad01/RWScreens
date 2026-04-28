@@ -1,6 +1,8 @@
 // providers/alpaca.js
 // Alpaca Markets data provider — free IEX feed.
 // Implements the standard provider interface used by server.js and scanner.js.
+
+import { getRecentTickers } from '../engine/trade_ideas_db.js';
 //
 // Provider interface (both providers implement these):
 //   connect(credentials)
@@ -172,7 +174,9 @@ class AlpacaProvider {
 
   /**
    * Top movers (gainers) for scanner seeding.
-   * Tries Alpaca screener first, falls back to snapshot of a momentum watchlist.
+   * Strategy 1: Alpaca screener (requires Unlimited plan).
+   * Strategy 2: Trade Ideas DB tickers → Alpaca snapshot (opt-in via TRADE_IDEAS_DB_PATH).
+   * Strategy 3: Hardcoded momentum watchlist snapshot (free IEX fallback).
    */
   async fetchGainers() {
     // Strategy 1: Alpaca screener endpoint (requires Unlimited plan)
@@ -196,21 +200,29 @@ class AlpacaProvider {
       }
     } catch (_) {}
 
-    // Strategy 2: Snapshot a curated watchlist of commonly active small caps
-    // and rank by percent change. This works on free IEX tier.
-    console.log('[alpaca] Screener unavailable — fetching snapshot watchlist');
+    // Strategy 2: Trade Ideas DB — real pre-market gappers from the scraper
+    try {
+      const tiTickers = getRecentTickers();
+      if (tiTickers.length > 0) {
+        console.log('[alpaca] Seeding from Trade Ideas DB →', tiTickers.slice(0, 8).join(', '));
+        const rows = await this._fetchWatchlistSnapshot(tiTickers);
+        if (rows.length > 0) return rows;
+      }
+    } catch (_) {}
+
+    // Strategy 3: Hardcoded watchlist snapshot (free IEX fallback)
+    console.log('[alpaca] No Trade Ideas data — fetching hardcoded watchlist snapshot');
     return this._fetchWatchlistSnapshot();
   }
 
   /**
-   * Fetches snapshots for a curated list of commonly volatile small caps,
-   * filters by price/volume criteria, and sorts by percent change.
-   * This is the free-tier fallback for scanner seeding.
+   * Fetches Alpaca snapshots for the given tickers (or the hardcoded fallback
+   * watchlist when none supplied), filters by price/volume, and sorts by
+   * percent change descending.
    */
-  async _fetchWatchlistSnapshot() {
-    // A broad watchlist of typically active small/micro cap tickers.
-    // In production you'd pull this from a screener; for now this covers many momentum days.
-    const watchlist = [
+  async _fetchWatchlistSnapshot(tickers = null) {
+    // Hardcoded fallback: typically active small/micro caps for momentum days.
+    const watchlist = tickers && tickers.length > 0 ? tickers : [
       'AAPL','TSLA','NVDA','AMD','META','AMZN','GOOGL','MSFT','NFLX','SPY',
       'QQQ','SOXL','TQQQ','UVXY','SQQQ','SPXL','FAS','LABU','NAIL','GUSH',
       'RIOT','MARA','COIN','PLTR','SOFI','HOOD','OPEN','AFRM','LCID','RIVN',
