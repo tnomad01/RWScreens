@@ -64,7 +64,7 @@ class PolygonProvider {
     const url = `${REST_URL}/v2/aggs/ticker/${ticker}/range/${multiplier}/${timespan}/${from}/${to}` +
       `?adjusted=true&sort=asc&limit=1000&apiKey=${this.credentials.apiKey}`;
     const data = await this._fetch(url);
-    return (data.results || []).map(r => ({
+    const bars = (data.results || []).map(r => ({
       time:   Math.floor(r.t / 1000),
       open:   r.o,
       high:   r.h,
@@ -72,6 +72,7 @@ class PolygonProvider {
       close:  r.c,
       volume: r.v,
     }));
+    return { bars, dataSource: 'polygon' };
   }
 
   async fetchQuote(ticker) {

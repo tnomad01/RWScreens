@@ -8,9 +8,13 @@ const ET_OPEN_MINUTE = 30;
 
 // Per-ticker state
 const state = {};
+const MAX_STATE_TICKERS = 200;
 
 function _getState(ticker) {
   if (!state[ticker]) {
+    const keys = Object.keys(state);
+    if (keys.length >= MAX_STATE_TICKERS) delete state[keys[0]];
+
     state[ticker] = {
       // VWAP accumulators (reset each session)
       cumTPV:  0,   // cumulative (typical price × volume)

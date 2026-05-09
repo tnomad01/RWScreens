@@ -108,6 +108,9 @@ window.selectSymbol = async function(ticker) {
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
+const CACHE_MAX_SYMBOLS = 10;
+const _cacheOrder = [];  // insertion-order tracker for LRU eviction
+
 export async function fetchBars(ticker, timeframe) {
   const cache = window.liveData.chartDataCache;
   if (cache[ticker]?.[timeframe]) return cache[ticker][timeframe];
@@ -116,7 +119,13 @@ export async function fetchBars(ticker, timeframe) {
   if (!res.ok) throw new Error(`/api/bars error: ${res.status}`);
   const data = await res.json();
 
-  if (!cache[ticker]) cache[ticker] = {};
+  if (!cache[ticker]) {
+    cache[ticker] = {};
+    _cacheOrder.push(ticker);
+    if (_cacheOrder.length > CACHE_MAX_SYMBOLS) {
+      delete cache[_cacheOrder.shift()];
+    }
+  }
   cache[ticker][timeframe] = data;
   return data;
 }

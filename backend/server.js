@@ -66,9 +66,9 @@ app.get('/api/bars', async (req, res) => {
   if (!ticker || !timeframe) return res.status(400).json({ error: 'ticker and timeframe required' });
 
   try {
-    const raw    = await provider.fetchRawBars(ticker, timeframe);
+    const { bars: raw, dataSource } = await provider.fetchRawBars(ticker, timeframe);
     const result = computeHistory(ticker, raw);
-    res.json(result);
+    res.json({ ...result, dataSource });
   } catch (err) {
     console.error('[/api/bars]', err.message);
     res.status(500).json({ error: err.message });
@@ -121,6 +121,21 @@ app.get('/api/scanners', (_req, res) => res.json(getScanners()));
  */
 app.get('/api/provider', (_req, res) => res.json({ name: PROVIDER_NAME }));
 
+/**
+ * GET /api/scanner-debug — explains Trade Ideas seed filtering.
+ */
+app.get('/api/scanner-debug', (_req, res) => {
+  const debug = typeof provider.getScannerSeedDebug === 'function'
+    ? provider.getScannerSeedDebug()
+    : {
+        source: PROVIDER_NAME,
+        refreshedAt: null,
+        candidates: [],
+        message: 'Provider does not expose scanner seed diagnostics.',
+      };
+  res.json(debug);
+});
+
 // ── Browser WebSocket server ──────────────────────────────────────────────────
 
 const wss     = new WebSocketServer({ server });
@@ -150,6 +165,8 @@ wss.on('connection', (ws) => {
     clients.delete(ws);
     console.log(`[ws] Client disconnected (${clients.size} total)`);
   });
+
+  ws.on('error', () => clients.delete(ws));
 });
 
 // ── Route provider messages → browser clients ─────────────────────────────────

@@ -3,6 +3,8 @@
 // Implements the standard provider interface used by server.js and scanner.js.
 
 import { getRecentTickers } from '../engine/trade_ideas_db.js';
+import YahooFinance from 'yahoo-finance2';
+const _yf = new YahooFinance();
 //
 // Provider interface (both providers implement these):
 //   connect(credentials)
@@ -19,6 +21,9 @@ import { WebSocket } from 'ws';
 
 const WS_URL  = 'wss://stream.data.alpaca.markets/v2/iex';
 const REST_URL = 'https://data.alpaca.markets';
+const TI_PRICE_MIN = 0.50;
+const TI_PRICE_MAX = 30;
+const TI_VOLUME_MIN = 100_000;
 
 class AlpacaProvider {
   constructor() {
@@ -31,6 +36,13 @@ class AlpacaProvider {
     this.heartbeatTimer  = null;
     this.credentials     = null;
     this.handlers        = [];
+    this.tradeIdeasDebug = {
+      source: 'none',
+      refreshedAt: null,
+      requested: 0,
+      accepted: 0,
+      candidates: [],
+    };
     // Pending subscriptions (sent after auth)
     this.pending = { trades: new Set(), bars: new Set(), updatedBars: new Set() };
   }
@@ -83,6 +95,10 @@ class AlpacaProvider {
     this.handlers.push(handler);
   }
 
+  getScannerSeedDebug() {
+    return this.tradeIdeasDebug;
+  }
+
   // ── REST ──────────────────────────────────────────────────────────────────
 
   /**
@@ -91,12 +107,21 @@ class AlpacaProvider {
    *       '10s' maps to '1Min' bars — live updatedBars provide near-real-time detail.
    */
   async fetchRawBars(ticker, timeframe) {
+    // Try Yahoo Finance first — full market coverage, 15-min delayed
+    try {
+      const bars = await _fetchYahooBars(ticker, timeframe);
+      if (bars.length > 0) return { bars, dataSource: 'yahoo' };
+    } catch (err) {
+      console.warn(`[alpaca] Yahoo Finance bars failed for ${ticker}:`, err.message);
+    }
+
+    // Fall back to Alpaca IEX
     const { tf, from, to } = _resolveAlpacaTimeframe(timeframe);
     const url = `${REST_URL}/v2/stocks/${ticker}/bars` +
       `?timeframe=${tf}&start=${from}&end=${to}&limit=1000&feed=iex&adjustment=raw`;
     const data = await this._fetch(url);
 
-    return (data.bars || []).map(b => ({
+    const bars = (data.bars || []).map(b => ({
       time:   Math.floor(new Date(b.t).getTime() / 1000),
       open:   b.o,
       high:   b.h,
@@ -104,6 +129,7 @@ class AlpacaProvider {
       close:  b.c,
       volume: b.v,
     }));
+    return { bars, dataSource: 'alpaca' };
   }
 
   /**
@@ -200,19 +226,237 @@ class AlpacaProvider {
       }
     } catch (_) {}
 
-    // Strategy 2: Trade Ideas DB — real pre-market gappers from the scraper
+    // Strategy 2: Trade Ideas DB + Alpaca batch snapshot enrichment.
+    // This avoids Polygon's low free-tier request rate by enriching many symbols
+    // in a single Alpaca request. Polygon prev remains a small fallback below.
     try {
-      const tiTickers = getRecentTickers();
-      if (tiTickers.length > 0) {
-        console.log('[alpaca] Seeding from Trade Ideas DB →', tiTickers.slice(0, 8).join(', '));
-        const rows = await this._fetchWatchlistSnapshot(tiTickers);
-        if (rows.length > 0) return rows;
+      const tiItems = getRecentTickers();
+      if (tiItems.length > 0) {
+        this._initTradeIdeasDebug(tiItems, 'alpaca_snapshot');
+        const tickerList = tiItems.map(r => r.ticker);
+        console.log('[alpaca] Seeding from Trade Ideas DB →', tickerList.slice(0, 8).join(', '));
+        const snapshotRows = await this._fetchTradeIdeasSnapshots(tiItems);
+        if (snapshotRows.length > 0) {
+          console.log(`[alpaca] Alpaca snapshot enriched ${snapshotRows.length}/${tiItems.length} Trade Ideas tickers`);
+          return snapshotRows.sort((a, b) => b.changeFromClosePct - a.changeFromClosePct);
+        }
+
+        // Fallback: Polygon free tier allows /v2/aggs/ticker/{t}/prev, but is
+        // request-limited, so this intentionally caps enrichment to a few names.
+        const prevMap = await this._fetchPolygonPrev(tickerList);
+        this._initTradeIdeasDebug(tiItems, 'polygon_prev_fallback');
+        const rows = [];
+        for (const { ticker, pctGain } of tiItems) {
+          const prev = prevMap[ticker];
+          if (!prev) {
+            this._markTradeIdeasDebug(ticker, { status: 'filtered', reason: 'no_polygon_prev_data' });
+            continue;
+          }
+          const prevClose = prev.prevClose;
+          const price     = _round(prevClose * (1 + pctGain / 100));
+          if (price < TI_PRICE_MIN || price > TI_PRICE_MAX) {
+            this._markTradeIdeasDebug(ticker, {
+              status: 'filtered',
+              reason: 'price_out_of_range',
+              price,
+              prevClose: _round(prevClose),
+              volume: prev.avgVolume || 500_000,
+            });
+            continue;
+          }
+          this._markTradeIdeasDebug(ticker, {
+            status: 'accepted',
+            reason: 'accepted',
+            price,
+            prevClose: _round(prevClose),
+            volume: prev.avgVolume || 500_000,
+          });
+          rows.push({
+            symbol:             ticker,
+            price,
+            prevClose:          _round(prevClose),
+            open:               price,
+            volume:             prev.avgVolume || 500_000,
+            avgDailyVolume:     prev.avgVolume || 500_000,
+            gapPct:             _round(pctGain),
+            changeFromClose:    _round(price - prevClose),
+            changeFromClosePct: _round(pctGain),
+          });
+        }
+        if (rows.length > 0) {
+          console.log(`[alpaca] Polygon prev enriched ${rows.length} tickers (price-filtered from ${Object.keys(prevMap).length})`);
+          return rows.sort((a, b) => b.changeFromClosePct - a.changeFromClosePct);
+        }
       }
-    } catch (_) {}
+    } catch (err) {
+      this.tradeIdeasDebug = {
+        ...this.tradeIdeasDebug,
+        source: 'trade_ideas_error',
+        refreshedAt: new Date().toISOString(),
+        error: err.message,
+      };
+    }
 
     // Strategy 3: Hardcoded watchlist snapshot (free IEX fallback)
     console.log('[alpaca] No Trade Ideas data — fetching hardcoded watchlist snapshot');
     return this._fetchWatchlistSnapshot();
+  }
+
+  /**
+   * Enriches Trade Ideas OCR candidates with Alpaca's batch snapshots endpoint.
+   * This is one request per chunk instead of one request per ticker, which lets
+   * us seed many more candidates than Polygon's prev endpoint allows.
+   */
+  async _fetchTradeIdeasSnapshots(tiItems) {
+    const symbols = [...new Set(tiItems.map(item => item.ticker))];
+    const pctMap  = new Map(tiItems.map(item => [item.ticker, item.pctGain]));
+    const chunks  = _chunks(symbols, 100);
+    const rows    = [];
+
+    for (const chunk of chunks) {
+      const data = await this._fetch(
+        `${REST_URL}/v2/stocks/snapshots?symbols=${chunk.join(',')}&feed=iex`
+      );
+
+      const returned = new Set(Object.keys(data));
+      for (const symbol of chunk) {
+        if (!returned.has(symbol)) {
+          this._markTradeIdeasDebug(symbol, {
+            status: 'filtered',
+            reason: 'no_alpaca_snapshot',
+          });
+        }
+      }
+
+      for (const [symbol, snap] of Object.entries(data)) {
+        const day  = snap.dailyBar     || {};
+        const prev = snap.prevDailyBar || {};
+        const lt   = snap.latestTrade  || {};
+
+        const price     = lt.p || day.c || 0;
+        const prevClose = prev.c || (pctMap.get(symbol) ? price / (1 + pctMap.get(symbol) / 100) : price);
+        const volume    = day.v || 0;
+
+        if (!price || !prevClose) {
+          this._markTradeIdeasDebug(symbol, {
+            status: 'filtered',
+            reason: 'missing_price_or_prev_close',
+            price,
+            prevClose,
+            volume,
+          });
+          continue;
+        }
+        if (price < TI_PRICE_MIN || price > TI_PRICE_MAX) {
+          this._markTradeIdeasDebug(symbol, {
+            status: 'filtered',
+            reason: 'price_out_of_range',
+            price: _round(price),
+            prevClose: _round(prevClose),
+            volume,
+          });
+          continue;
+        }
+
+        if (volume < TI_VOLUME_MIN) {
+          this._markTradeIdeasDebug(symbol, {
+            status: 'filtered',
+            reason: 'volume_under_min',
+            price: _round(price),
+            prevClose: _round(prevClose),
+            volume,
+          });
+          continue;
+        }
+
+        const changeFromClose    = price - prevClose;
+        const changeFromClosePct = prevClose > 0
+          ? (changeFromClose / prevClose) * 100
+          : (pctMap.get(symbol) || 0);
+        const gapPct = prevClose > 0 ? ((day.o || price) - prevClose) / prevClose * 100 : 0;
+
+        this._markTradeIdeasDebug(symbol, {
+          status: 'accepted',
+          reason: 'accepted',
+          price: _round(price),
+          prevClose: _round(prevClose),
+          volume,
+          changeFromClosePct: _round(changeFromClosePct),
+        });
+
+        rows.push({
+          symbol,
+          price:              _round(price),
+          prevClose:          _round(prevClose),
+          open:               _round(day.o || price),
+          volume,
+          float:              0,
+          avgDailyVolume:     prev.v || volume || 500_000,
+          gapPct:             _round(gapPct || pctMap.get(symbol) || 0),
+          changeFromClose:    _round(changeFromClose),
+          changeFromClosePct: _round(changeFromClosePct),
+        });
+      }
+    }
+
+    return rows;
+  }
+
+  _initTradeIdeasDebug(tiItems, source) {
+    this.tradeIdeasDebug = {
+      source,
+      refreshedAt: new Date().toISOString(),
+      requested: tiItems.length,
+      accepted: 0,
+      filters: {
+        priceMin: TI_PRICE_MIN,
+        priceMax: TI_PRICE_MAX,
+        volumeMin: TI_VOLUME_MIN,
+      },
+      candidates: tiItems.map((item, index) => ({
+        rank: index + 1,
+        ticker: item.ticker,
+        pctGain: _round(item.pctGain || 0),
+        status: 'pending',
+        reason: 'pending_snapshot',
+      })),
+    };
+  }
+
+  _markTradeIdeasDebug(ticker, patch) {
+    const item = this.tradeIdeasDebug.candidates?.find(candidate => candidate.ticker === ticker);
+    if (!item) return;
+    Object.assign(item, patch);
+    this.tradeIdeasDebug.accepted = this.tradeIdeasDebug.candidates
+      .filter(candidate => candidate.status === 'accepted')
+      .length;
+  }
+
+  /**
+   * Fetches previous-day OHLCV from Polygon's free-tier prev endpoint.
+   * Free tier allows ~5 req/min, so we cap at the top 5 tickers (already
+   * ranked by Trade Ideas relevance) and fire them in one parallel burst.
+   * Returns { ticker: { prevClose, avgVolume } }.
+   */
+  async _fetchPolygonPrev(tickers) {
+    const apiKey = process.env.POLYGON_API_KEY;
+    if (!apiKey) return {};
+
+    const top     = tickers.slice(0, 5);
+    const results = {};
+
+    await Promise.all(top.map(async ticker => {
+      try {
+        const res  = await fetch(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${apiKey}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const r    = data.results?.[0];
+        if (r) results[ticker] = { prevClose: r.c, avgVolume: r.v };
+      } catch {}
+    }));
+
+    console.log(`[alpaca] Polygon prev: got data for ${Object.keys(results).length}/${top.length} tickers`);
+    return results;
   }
 
   /**
@@ -405,6 +649,31 @@ class AlpacaProvider {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+async function _fetchYahooBars(ticker, timeframe) {
+  const intervalMap = { '10s': '1m', '1m': '1m', '5m': '5m', '1D': '1d' };
+  const period1Map  = {
+    '10s': () => new Date(Date.now() - 2  * 3_600_000),
+    '1m':  () => new Date(Date.now() - 7  * 86_400_000),
+    '5m':  () => new Date(Date.now() - 60 * 86_400_000),
+    '1D':  () => new Date(Date.now() - 2  * 365 * 86_400_000),
+  };
+
+  const interval = intervalMap[timeframe] || '1m';
+  const period1  = (period1Map[timeframe] || period1Map['1m'])();
+
+  const result = await _yf.chart(ticker, { period1, interval }, { validateResult: false });
+  return (result.quotes || [])
+    .filter(q => q.open != null && q.close != null)
+    .map(q => ({
+      time:   Math.floor(new Date(q.date).getTime() / 1000),
+      open:   q.open,
+      high:   q.high,
+      low:    q.low,
+      close:  q.close,
+      volume: q.volume || 0,
+    }));
+}
+
 function _resolveAlpacaTimeframe(tf) {
   const now  = new Date().toISOString();
   switch (tf) {
@@ -424,6 +693,11 @@ function _daysAgo(n) {
 }
 function _round(n) {
   return Math.round(n * 100) / 100;
+}
+function _chunks(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
 }
 
 export default new AlpacaProvider();

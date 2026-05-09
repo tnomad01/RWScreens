@@ -9,9 +9,9 @@
 import Database from 'better-sqlite3';
 import { existsSync } from 'fs';
 
-const DB_PATH    = process.env.TRADE_IDEAS_DB_PATH;
 const LOOKBACK_H = 4;    // only consider captures from the last N hours
 const PCT_MAX    = 500;  // ignore Volume Today extreme values (139k%) as seed
+const DEFAULT_LIMIT = 100;
 
 const QUERY = `
   SELECT dt.ticker,
@@ -29,7 +29,8 @@ const QUERY = `
   LIMIT  ?
 `;
 
-export function getRecentTickers(limit = 30) {
+export function getRecentTickers(limit = DEFAULT_LIMIT) {
+  const DB_PATH = process.env.TRADE_IDEAS_DB_PATH;
   if (!DB_PATH) return [];
   if (!existsSync(DB_PATH)) {
     console.warn('[trade_ideas_db] DB not found at', DB_PATH);
@@ -45,7 +46,7 @@ export function getRecentTickers(limit = 30) {
       console.log(`[trade_ideas_db] ${rows.length} tickers from last ${LOOKBACK_H}h:`,
         rows.slice(0, 8).map(r => r.ticker).join(', '));
     }
-    return rows.map(r => r.ticker);
+    return rows.map(r => ({ ticker: r.ticker, pctGain: r.avg_gain }));
   } catch (err) {
     console.warn('[trade_ideas_db] Read failed:', err.message);
     return [];

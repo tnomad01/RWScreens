@@ -101,6 +101,12 @@ function createWarriorChart(name, cfg) {
     ema200:     ema200Series,
   };
 
+  // Sync chart dimensions to container whenever CSS flex reflows the height
+  new ResizeObserver(entries => {
+    const { width, height } = entries[0].contentRect;
+    if (width > 0 && height > 0) chart.applyOptions({ width, height });
+  }).observe(container);
+
   return chart;
 }
 
@@ -131,6 +137,10 @@ async function loadChart(name, ticker, timeframe) {
     );
 
     chartRegistry[name].timeScale().fitContent();
+
+    // Show 15MIN DLY badge when data comes from Yahoo Finance
+    const badge = document.querySelector(`.delay-badge[data-chart="${name}"]`);
+    if (badge) badge.classList.toggle('active', data.dataSource === 'yahoo');
   } catch (err) {
     console.error(`[charts] loadChart(${name}, ${ticker}, ${timeframe}):`, err.message);
   }
