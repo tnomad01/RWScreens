@@ -243,7 +243,7 @@ server.listen(PORT, () => {
         }
       } catch { /* non-fatal — /5P will show "not yet computed" until a chart is opened */ }
     }
+    startNewsAggregator(getScanners, provider);
   });
   startPolling(getScanners, ema200Cache, provider);
-  startNewsAggregator(getScanners, provider);
 });

@@ -5,6 +5,7 @@
 import https from 'https';
 import { sendMessage } from './telegram.js';
 import { evalPillars, getNewsFromCache, refreshNewsAsync, topTickers } from './pillars-tracker.js';
+import { enrichWithFloat } from '../engine/scanner.js';
 
 let lastUpdateId = 0;
 
@@ -61,24 +62,46 @@ export function _processUpdate(update, getScanners, ema200Cache, provider) {
     const ticker = text.replace(/^\/5[pP]\s*/i, '').toUpperCase().trim();
     if (ticker) handle5P(ticker, sc, ema200Cache, provider);
   }
-  if (/^\/top5\b/i.test(text)) {
+  if (/^\/top5?\b/i.test(text)) {
     handleTop5(sc, ema200Cache);
   }
 }
 
 // ── /5P handler ───────────────────────────────────────────────────────────────
 
-export function handle5P(ticker, scanners, ema200Cache, provider) {
-  const row = scanners.dayTrade?.find(r => r.symbol === ticker)
-           ?? scanners.highMomentum?.find(r => r.symbol === ticker)
-           ?? scanners.lowFloat?.find(r => r.symbol === ticker)
-           ?? scanners.runningUp?.find(r => r.symbol === ticker)
-           ?? scanners.session?.[ticker]
-           ?? null;
+export async function handle5P(ticker, scanners, ema200Cache, provider) {
+  let row = scanners.dayTrade?.find(r => r.symbol === ticker)
+          ?? scanners.highMomentum?.find(r => r.symbol === ticker)
+          ?? scanners.lowFloat?.find(r => r.symbol === ticker)
+          ?? scanners.runningUp?.find(r => r.symbol === ticker)
+          ?? scanners.session?.[ticker]
+          ?? null;
 
+  let liveMode = false;
   if (!row) {
-    sendMessage(`❌ <b>${ticker}</b> not found in scanner`);
-    return;
+    if (!provider) {
+      sendMessage(`❌ <b>${ticker}</b> not found in scanner`);
+      return;
+    }
+    try {
+      const [quote, floatShares] = await Promise.all([
+        provider.fetchQuote(ticker),
+        enrichWithFloat(ticker),
+      ]);
+      row = {
+        symbol:             ticker,
+        price:              quote.price,
+        float:              floatShares ?? 0,
+        relVolDaily:        quote.relVolDaily,
+        gapPct:             quote.gapPct,
+        changeFromClosePct: quote.changePct,
+        preMarketVolPct:    0,
+      };
+      liveMode = true;
+    } catch {
+      sendMessage(`❌ <b>${ticker}</b> not found in scanner or provider`);
+      return;
+    }
   }
 
   const ruRow  = scanners.runningUp?.find(r => r.symbol === ticker) ?? null;
@@ -93,7 +116,7 @@ export function handle5P(ticker, scanners, ema200Cache, provider) {
   const pillars = evalPillars(row, ruRow, ema200, hasNews);
   const score   = Object.values(pillars).filter(Boolean).length;
 
-  sendMessage(format5P(ticker, row, ruRow, pillars, score, ema200));
+  sendMessage(format5P(ticker, row, ruRow, pillars, score, ema200, liveMode));
 }
 
 // ── /top5 handler ─────────────────────────────────────────────────────────────
@@ -155,7 +178,7 @@ function fmtFloat(v) {
   return String(v);
 }
 
-function format5P(ticker, row, ruRow, pillars, score, ema200) {
+function format5P(ticker, row, ruRow, pillars, score, ema200, liveMode = false) {
   const momentumNote = ruRow
     ? `5m RVOL ${fmtNum(ruRow.relVol5minPct, 1)}× (Δ${fmtNum(ruRow.delta5minVsDaily, 1)})`
     : `Gap ${(row.gapPct ?? 0) > 0 ? '+' : ''}${fmtNum(row.gapPct)}%`;
@@ -174,8 +197,12 @@ function format5P(ticker, row, ruRow, pillars, score, ema200) {
     ? `\n🔍 <b>Potential</b>: Pre-mkt vol ${fmtNum((row.preMarketVolPct ?? 0) * 100, 0)}% of avg daily — worth watching`
     : '';
 
+  const header = liveMode
+    ? `📊 <b>${ticker}</b> — 5 Pillars <i>(live lookup)</i>`
+    : `📊 <b>${ticker}</b> — 5 Pillars`;
+
   return [
-    `📊 <b>${ticker}</b> — 5 Pillars`,
+    header,
     '',
     `${pillars.lowFloat    ? '✅' : '❌'} Low Float: ${fmtFloat(row.float)} shares`,
     `${pillars.highRelVol  ? '✅' : '❌'} High Relative Vol: ${fmtNum(row.relVolDaily)}×`,
