@@ -123,6 +123,19 @@ export function computeHistory(ticker, bars) {
   return { candles, volume, vwap, vwapPlus1, vwapMinus1, vwapPlus2, vwapMinus2, ema9, ema20, ema200 };
 }
 
+/**
+ * Computes the 200-day EMA from a daily bar array without touching session state.
+ * Used to pre-populate ema200Cache at startup for the /5P strong daily pillar.
+ * Returns the final EMA200 value, or null if fewer than 1 bar.
+ */
+export function computeDailyEma200(bars) {
+  let ema200 = null;
+  for (const bar of bars) {
+    ema200 = _ema(bar.close, ema200, 200);
+  }
+  return ema200 !== null ? _round(ema200) : null;
+}
+
 /** Reset all state (e.g., on new trading day) */
 export function resetAll() {
   for (const key of Object.keys(state)) delete state[key];

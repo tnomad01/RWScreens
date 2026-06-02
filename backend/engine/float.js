@@ -1,7 +1,13 @@
 // engine/float.js
-// Fetches share float (and avg volume) from Finviz quote pages.
+// Fetches share float (and avg volume) with a two-source fallback chain:
+//   1. Finviz  — primary; fast HTML scrape, works for most NYSE/NASDAQ stocks
+//   2. Yahoo Finance — fallback via yahoo-finance2 (already installed, no extra key)
+// ETFs return null from both sources and are naturally excluded.
 // Results cached in memory for the session — float barely changes day to day.
-// One fetch per ticker, 300ms spacing between requests to stay polite.
+
+import YahooFinance from 'yahoo-finance2';
+
+const _yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 const CACHE   = {};   // { ticker: { float, avgVolume, marketCap } | null }
 const PENDING = {};   // in-flight promises — prevents duplicate requests
@@ -21,7 +27,7 @@ const HEADERS = {
 /**
  * Returns { float, avgVolume, marketCap } for a ticker.
  * float and avgVolume are raw numbers (e.g. 1330000 for 1.33M).
- * Returns null on failure (scrape blocked / ticker not found).
+ * Returns null on failure — ticker not found on either source (likely an ETF).
  */
 export async function getFloat(ticker) {
   ticker = ticker.toUpperCase();
@@ -66,20 +72,22 @@ export function clearCache() {
 // ── Internal ──────────────────────────────────────────────────────────────────
 
 async function _fetchFloat(ticker) {
+  const finviz = await _fetchFromFinviz(ticker);
+  if (finviz) return finviz;
+  return _fetchFromYahoo(ticker);
+}
+
+async function _fetchFromFinviz(ticker) {
   try {
     const url = `${FINVIZ_URL}?t=${ticker}&ty=c&ta=1&p=d`;
     const res  = await fetch(url, { headers: HEADERS });
 
-    if (res.status === 404) { console.warn(`[float] ${ticker}: not found on Finviz`); return null; }
-    if (!res.ok)            { console.warn(`[float] ${ticker}: HTTP ${res.status}`);  return null; }
+    if (res.status === 404) return null;
+    if (!res.ok)            { console.warn(`[float] ${ticker}: Finviz HTTP ${res.status}`); return null; }
 
     const html = await res.text();
     const data = _parseFinvizTable(html);
-
-    if (!data['Shs Float']) {
-      console.warn(`[float] ${ticker}: Shs Float not found in page`);
-      return null;
-    }
+    if (!data['Shs Float']) return null;
 
     const result = {
       float:      _parseNum(data['Shs Float']),
@@ -89,8 +97,30 @@ async function _fetchFloat(ticker) {
 
     console.log(`[float] ${ticker}: float=${_fmt(result.float)} avgVol=${_fmt(result.avgVolume)}`);
     return result;
-  } catch (err) {
-    console.warn(`[float] ${ticker}:`, err.message);
+  } catch {
+    return null;
+  }
+}
+
+async function _fetchFromYahoo(ticker) {
+  try {
+    const r = await _yf.quoteSummary(ticker, {
+      modules: ['defaultKeyStatistics', 'summaryDetail'],
+    });
+
+    const floatShares = r.defaultKeyStatistics?.floatShares;
+    if (!floatShares) {
+      console.warn(`[float] ${ticker}: not found on Finviz or Yahoo — skipping`);
+      return null;
+    }
+
+    const avgVolume = r.summaryDetail?.averageVolume ?? null;
+    const marketCap = r.summaryDetail?.marketCap ?? null;
+
+    console.log(`[float] ${ticker}: float=${_fmt(floatShares)} avgVol=${_fmt(avgVolume)} (Yahoo)`);
+    return { float: floatShares, avgVolume, marketCap };
+  } catch {
+    console.warn(`[float] ${ticker}: not found on Finviz or Yahoo — skipping`);
     return null;
   }
 }

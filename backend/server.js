@@ -12,7 +12,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 
 import alpacaProvider  from './providers/alpaca.js';
 import polygonProvider from './providers/polygon.js';
-import { computeHistory, updateBar }                               from './engine/vwap.js';
+import { computeHistory, updateBar, computeDailyEma200 }           from './engine/vwap.js';
 import { init as initScanner, getScanners, startScanning, handleTick, enrichWithFloat } from './engine/scanner.js';
 import { checkNewGainers } from './alerts/gainers-tracker.js';
 import { startPolling }    from './alerts/bot-commands.js';
@@ -223,13 +223,25 @@ initScanner({ broadcast, provider });
 server.listen(PORT, () => {
   console.log(`🟢 Warrior Trading running at http://localhost:${PORT}\n`);
   provider.connect(credentials);
-  startScanning().then(() => {
+  startScanning().then(async () => {
     const seeded = getScanners().dayTrade.map(r => r.symbol);
     if (seeded.length > 0) {
       console.log(`[scanner] Subscribing to ${seeded.length} seeded tickers:`, seeded.join(', '));
       provider.subscribe(seeded);
     }
     checkNewGainers(getScanners());
+
+    // Pre-compute 200-day EMA for /5P strong daily pillar
+    for (const ticker of seeded) {
+      try {
+        const { bars } = await provider.fetchRawBars(ticker, '1D');
+        const ema200 = computeDailyEma200(bars);
+        if (ema200 !== null) {
+          ema200Cache.set(ticker, ema200);
+          console.log(`[ema200] ${ticker}: ${ema200}`);
+        }
+      } catch { /* non-fatal — /5P will show "not yet computed" until a chart is opened */ }
+    }
   });
   startPolling(getScanners, ema200Cache, provider);
 });

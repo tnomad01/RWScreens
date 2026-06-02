@@ -32,6 +32,10 @@ const scanners = {
   runningUp:    [],    // velocity-based alert feed, prepend newest
 };
 
+// Last-known row for every ticker seen this session — persists even after eviction.
+// Used by /5P so it can look up any seeded ticker regardless of scanner state.
+const sessionRows = {};
+
 // Rolling 5-min window timestamps for scanner headers
 const window5min = {
   from: _etTimeStr(Date.now() - 5 * 60_000),
@@ -65,7 +69,7 @@ export function init({ broadcast, provider: p }) {
 }
 
 export function getScanners() {
-  return { ...scanners, window5min };
+  return { ...scanners, window5min, session: sessionRows };
 }
 
 export async function startScanning() {
@@ -90,7 +94,13 @@ export async function startScanning() {
       for (const g of filtered) {
         const floatData = floatMap[g.symbol];
         const float     = floatData?.float ?? 0;
-        const avgVol    = floatData?.avgVolume ?? g.avgDailyVolume ?? g.volume ?? 500_000;
+
+        if (!float) {
+          console.log(`[scanner] ${g.symbol}: skipping — no float data (ETF or not on Finviz)`);
+          continue;
+        }
+
+        const avgVol = floatData?.avgVolume ?? g.avgDailyVolume ?? g.volume ?? 500_000;
 
         tickerMeta[g.symbol] = {
           sessionVol:     g.volume,
@@ -200,6 +210,9 @@ function _buildRow(time, g, float, avgVol) {
 }
 
 function _updateRow(ticker, row) {
+  // Always record the latest row so /5P can find any seeded ticker
+  sessionRows[ticker] = row;
+
   // Remove tickers that have gone negative — scanners show only gainers
   if ((row.changeFromClosePct ?? 0) <= 0) {
     for (const list of [scanners.dayTrade, scanners.lowFloat]) {
@@ -212,7 +225,7 @@ function _updateRow(ticker, row) {
   _upsertRow(scanners.dayTrade, ticker, row);
 
   // lowFloat is the union of dayTrade and highMomentum candidates with float < threshold
-  if ((row.float > 0 && row.float <= FLOAT_MAX_LOW) || row.float === 0) {
+  if (row.float > 0 && row.float <= FLOAT_MAX_LOW) {
     _upsertRow(scanners.lowFloat, ticker, row);
   } else {
     const idx = scanners.lowFloat.findIndex(r => r.symbol === ticker);
