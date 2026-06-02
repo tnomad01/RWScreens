@@ -146,7 +146,7 @@ export function handleTick(msg) {
   // Update sorted scanner rows
   const existing = _findRow(ticker);
   if (existing) {
-    const relVolDaily        = meta.avgDailyVolume > 0 ? meta.sessionVol / meta.avgDailyVolume : 0;
+    const relVolDaily        = _calcRelVolDaily(meta);
     const changeFromClose    = price - (meta.prevClose || price);
     const changeFromClosePct = (meta.prevClose || 0) > 0 ? (changeFromClose / meta.prevClose) * 100 : 0;
     const relVol5min         = _calc5minRelVol(meta);
@@ -189,8 +189,16 @@ export async function enrichWithFloat(ticker) {
 // ── Internal ──────────────────────────────────────────────────────────────────
 
 function _buildRow(time, g, float, avgVol) {
-  const relVolDaily = avgVol > 0 ? (g.volume || 0) / avgVol : 0;
+  const seedMeta    = { sessionVol: g.volume || 0, avgDailyVolume: avgVol };
+  const relVolDaily = _calcRelVolDaily(seedMeta);
   const relVol5min  = 0; // populated on first tick
+
+  // Pre-market volume ratio: raw sessionVol / avgDailyVolume, captured once at
+  // seed time and never overwritten by live ticks. Used for the Potential trigger:
+  // > 25% of average daily volume traded before the open is a meaningful signal
+  // that institutional/retail interest is elevated before the session starts.
+  const preMarketVolPct = avgVol > 0 ? _round((g.volume || 0) / avgVol) : 0;
+
   return {
     time,
     symbol:             g.symbol,
@@ -205,6 +213,7 @@ function _buildRow(time, g, float, avgVol) {
     gapPct:             _round(g.gapPct),
     changeFromClose:    _round(g.changeFromClose),
     changeFromClosePct: _round(g.changeFromClosePct),
+    preMarketVolPct,
     newsIcon:           _computeNewsIcon(relVolDaily, g.changeFromClosePct || 0),
   };
 }
@@ -242,7 +251,7 @@ function _pushMomentumAlert(ticker, price, meta) {
   const existing = _findRow(ticker);
   if (!existing) return;
 
-  const relVolDaily = meta.avgDailyVolume > 0 ? meta.sessionVol / meta.avgDailyVolume : 0;
+  const relVolDaily = _calcRelVolDaily(meta);
   const relVol5min  = _calc5minRelVol(meta);
   const newsIcon    = _computeNewsIcon(relVolDaily, existing.changeFromClosePct || 0);
 
@@ -285,7 +294,7 @@ function _evaluateRunningUp(ticker, price, meta, now) {
 
   if (pricePctAdv < RU_PRICE_ADV_PCT) return;
 
-  const relVolDaily = meta.avgDailyVolume > 0 ? meta.sessionVol / meta.avgDailyVolume : 0;
+  const relVolDaily = _calcRelVolDaily(meta);
   if (relVolDaily < RU_REL_VOL_DAILY) return;
 
   const relVol5min = _calc5minRelVol(meta);
@@ -333,6 +342,38 @@ function _evaluateRunningUp(ticker, price, meta, now) {
     scanners.runningUp.unshift(alert);
     if (scanners.runningUp.length > RU_MAX_ROWS) scanners.runningUp.pop();
   }
+}
+
+/**
+ * Relative Volume (daily) — same-time-of-day normalisation.
+ *
+ * Objective: RVOL = cumulative volume today so far
+ *                   ÷ average cumulative volume at the same time of day
+ *                     over prior N trading days.
+ *
+ * Approximation (no historical intraday bars required):
+ *   Assume volume distributes linearly across the 390-minute session, so:
+ *     avg cum vol at minute T  =  avgDailyVolume × (T / 390)
+ *
+ *   Therefore:
+ *     RVOL  =  sessionVol  /  (avgDailyVolume × minutesSinceOpen / 390)
+ *           =  sessionVol × 390  /  (avgDailyVolume × minutesSinceOpen)
+ *
+ *   A stock trading 3× its normal rate at this time of day returns 3.0.
+ *   Outside regular hours (minutesSinceOpen = 0) falls back to the raw
+ *   ratio (sessionVol / avgDailyVolume) so pre-market values are still
+ *   visible but not pace-adjusted.
+ */
+function _calcRelVolDaily(meta) {
+  const adv = meta.avgDailyVolume || 0;
+  if (adv <= 0) return 0;
+  const minutesSinceOpen = _minutesSinceOpen();
+  if (minutesSinceOpen > 0) {
+    // Same-time-of-day pace: how many times the expected volume has traded
+    return (meta.sessionVol * 390) / (adv * minutesSinceOpen);
+  }
+  // Outside market hours — raw ratio (pre-market or post-market)
+  return meta.sessionVol / adv;
 }
 
 function _calc5minRelVol(meta) {

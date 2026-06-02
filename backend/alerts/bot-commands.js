@@ -111,6 +111,10 @@ function format5P(ticker, row, ruRow, pillars, score, ema200) {
       ? `🟡 <b>WATCH — ${score}/5 Pillars</b>`
       : `⚪ <b>NO SETUP — ${score}/5 Pillars</b>`;
 
+  const potentialLine = pillars.potential
+    ? `\n🔍 <b>Potential</b>: Pre-mkt vol ${fmtNum((row.preMarketVolPct ?? 0) * 100, 0)}% of avg daily — worth watching`
+    : '';
+
   return [
     `📊 <b>${ticker}</b> — 5 Pillars`,
     '',
@@ -120,6 +124,6 @@ function format5P(ticker, row, ruRow, pillars, score, ema200) {
     `${pillars.momentum    ? '✅' : '❌'} Momentum: ${momentumNote}`,
     `${pillars.strongDaily ? '✅' : '❌'} Strong Daily: ${ema200Note}`,
     '',
-    `Score: ${score}/5 — ${scoreLabel}`,
+    `Score: ${score}/5 — ${scoreLabel}${potentialLine}`,
   ].join('\n');
 }
