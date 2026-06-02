@@ -25,6 +25,39 @@ export function refreshNewsAsync(ticker, provider) {
 
 // ── Pillar evaluation (mirrors frontend/js/pillars.js:evaluatePillars) ────────
 
+/**
+ * Returns up to `n` tickers ranked by pillar score then RVOL.
+ * Filters to float > 0 and < 10M. Deduplicates across all scanner arrays.
+ */
+export function topTickers(scanners, ema200Cache, n = 5) {
+  const seen = new Map();
+  const sources = [
+    ...(scanners.dayTrade     || []),
+    ...(scanners.highMomentum || []),
+    ...(scanners.lowFloat     || []),
+    ...(scanners.runningUp    || []),
+    ...Object.values(scanners.session || {}),
+  ];
+  for (const row of sources) {
+    if (!seen.has(row.symbol)) seen.set(row.symbol, row);
+  }
+
+  const results = [];
+  for (const [sym, row] of seen) {
+    if (!(row.float > 0 && row.float < 10_000_000)) continue;
+    const ruRow  = scanners.runningUp?.find(r => r.symbol === sym) ?? null;
+    const ema200 = ema200Cache instanceof Map ? (ema200Cache.get(sym) ?? null) : (ema200Cache?.[sym] ?? null);
+    const hasNews = getNewsFromCache(sym) ?? false;
+    const pillars = evalPillars(row, ruRow, ema200, hasNews);
+    const score = ['lowFloat', 'highRelVol', 'catalyst', 'momentum', 'strongDaily']
+      .filter(k => pillars[k]).length;
+    results.push({ row, pillars, score });
+  }
+
+  results.sort((a, b) => b.score - a.score || (b.row.relVolDaily ?? 0) - (a.row.relVolDaily ?? 0));
+  return results.slice(0, n);
+}
+
 export function evalPillars(row, ruRow, ema200, hasNews) {
   const momentumPass = ruRow
     ? ((ruRow.relVol5minPct ?? 0) >= 3.0 && (ruRow.delta5minVsDaily ?? 0) >= 0.5)
