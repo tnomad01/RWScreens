@@ -14,6 +14,10 @@ import alpacaProvider  from './providers/alpaca.js';
 import polygonProvider from './providers/polygon.js';
 import { computeHistory, updateBar }                               from './engine/vwap.js';
 import { init as initScanner, getScanners, startScanning, handleTick, enrichWithFloat } from './engine/scanner.js';
+import { checkNewGainers } from './alerts/gainers-tracker.js';
+import { startPolling }    from './alerts/bot-commands.js';
+
+const ema200Cache = new Map();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -184,8 +188,10 @@ provider.onMessage((msg) => {
       const bar = msg.bar;
 
       // Feed scanner engine with bar data (for rel-vol tracking)
+      if (ind.ema200 !== null) ema200Cache.set(msg.ticker, ind.ema200);
       if (msg.timeframe === '10s' || msg.timeframe === '1m') {
         handleTick({ sym: msg.ticker, c: bar.close, av: bar.volume });
+        checkNewGainers(getScanners());
       }
 
       broadcast({
@@ -217,5 +223,13 @@ initScanner({ broadcast, provider });
 server.listen(PORT, () => {
   console.log(`🟢 Warrior Trading running at http://localhost:${PORT}\n`);
   provider.connect(credentials);
-  startScanning();
+  startScanning().then(() => {
+    const seeded = getScanners().dayTrade.map(r => r.symbol);
+    if (seeded.length > 0) {
+      console.log(`[scanner] Subscribing to ${seeded.length} seeded tickers:`, seeded.join(', '));
+      provider.subscribe(seeded);
+    }
+    checkNewGainers(getScanners());
+  });
+  startPolling(getScanners, ema200Cache, provider);
 });

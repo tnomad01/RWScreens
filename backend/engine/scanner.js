@@ -75,7 +75,8 @@ export async function startScanning() {
     const filtered = gainers.filter(g =>
       g.price >= PRICE_MIN &&
       g.price <= PRICE_MAX &&
-      g.volume >= VOL_MIN
+      g.volume >= VOL_MIN &&
+      (g.changeFromClosePct ?? g.gapPct ?? 0) > 0
     );
 
     if (filtered.length === 0) {
@@ -199,6 +200,15 @@ function _buildRow(time, g, float, avgVol) {
 }
 
 function _updateRow(ticker, row) {
+  // Remove tickers that have gone negative — scanners show only gainers
+  if ((row.changeFromClosePct ?? 0) <= 0) {
+    for (const list of [scanners.dayTrade, scanners.lowFloat]) {
+      const idx = list.findIndex(r => r.symbol === ticker);
+      if (idx >= 0) list.splice(idx, 1);
+    }
+    return;
+  }
+
   _upsertRow(scanners.dayTrade, ticker, row);
 
   // lowFloat is the union of dayTrade and highMomentum candidates with float < threshold
