@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Marketaux Trending",
+    "type": "api",
+    "channel": "marketaux_trending",
+    "envKey": "MARKETAUX_API_KEY",
+    "enabled": true,
+    "notes": "Single call returns all trending entities — no per-ticker quota burn"
+  },
+  {
+    "name": "StockTwits Trending",
+    "type": "api",
+    "channel": "stocktwits_trending",
+    "envKey": null,
+    "enabled": true,
+    "notes": "Free public trending endpoint"
+  },
+  {
+    "name": "Unusual Whales",
+    "type": "x",
+    "channel": "x_grok",
+    "handle": "@unusual_whales",
+    "envKey": "XAI_API_KEY_1",
+    "enabled": true
+  },
+  {
+    "name": "Trade Ideas Holly",
+    "type": "x",
+    "channel": "x_grok",
+    "handle": "@TradeIdeas_HB",
+    "envKey": "XAI_API_KEY_1",
+    "enabled": false,
+    "notes": "Enable if you want Holly bot tweet mentions"
+  }
+]

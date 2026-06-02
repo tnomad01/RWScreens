@@ -186,6 +186,44 @@ export async function enrichWithFloat(ticker) {
   return data?.float ?? null;
 }
 
+/**
+ * Inject a ticker discovered via news watcher into the scanner session.
+ * No-ops if the ticker is already tracked (tickerMeta entry exists).
+ */
+export function injectNewsDiscovery(ticker, quote, floatShares) {
+  if (tickerMeta[ticker]) return;
+
+  const avgVol = quote.volume || 1;
+  tickerMeta[ticker] = {
+    sessionVol:     quote.volume || 0,
+    avgDailyVolume: avgVol,
+    prevClose:      quote.prevClose || quote.price,
+    open:           quote.open      || quote.price,
+    float:          floatShares     || 0,
+  };
+  highWatermarks[ticker] = quote.price;
+
+  const row = _buildRow(
+    _etTimeStr(Date.now()),
+    {
+      symbol:             ticker,
+      price:              quote.price,
+      prevClose:          quote.prevClose  || quote.price,
+      open:               quote.open       || quote.price,
+      volume:             quote.volume     || 0,
+      gapPct:             quote.gapPct     || 0,
+      changeFromClose:    quote.change     || 0,
+      changeFromClosePct: quote.changePct  || 0,
+    },
+    floatShares || 0,
+    avgVol,
+  );
+
+  _updateRow(ticker, row);
+  provider?.subscribe([ticker]);
+  broadcastFn?.({ type: 'scanner', data: getScanners() });
+}
+
 // ── Internal ──────────────────────────────────────────────────────────────────
 
 function _buildRow(time, g, float, avgVol) {

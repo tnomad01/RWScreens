@@ -17,6 +17,7 @@ import { init as initScanner, getScanners, startScanning, handleTick, enrichWith
 import { checkNewGainers }    from './alerts/gainers-tracker.js';
 import { startPolling }       from './alerts/bot-commands.js';
 import { startNewsAggregator } from './alerts/news-aggregator.js';
+import { startNewsWatcher }    from './alerts/news-watcher.js';
 
 const ema200Cache = new Map();
 
@@ -244,6 +245,7 @@ server.listen(PORT, () => {
       } catch { /* non-fatal — /5P will show "not yet computed" until a chart is opened */ }
     }
     startNewsAggregator(getScanners, provider);
+    startNewsWatcher(getScanners, provider);
   });
   startPolling(getScanners, ema200Cache, provider);
 });
