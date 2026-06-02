@@ -191,7 +191,7 @@ provider.onMessage((msg) => {
       if (ind.ema200 !== null) ema200Cache.set(msg.ticker, ind.ema200);
       if (msg.timeframe === '10s' || msg.timeframe === '1m') {
         handleTick({ sym: msg.ticker, c: bar.close, av: bar.volume });
-        checkNewGainers(getScanners());
+        if (msg.timeframe === '1m') checkNewGainers(getScanners());
       }
 
       broadcast({
