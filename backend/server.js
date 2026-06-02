@@ -14,8 +14,9 @@ import alpacaProvider  from './providers/alpaca.js';
 import polygonProvider from './providers/polygon.js';
 import { computeHistory, updateBar, computeDailyEma200 }           from './engine/vwap.js';
 import { init as initScanner, getScanners, startScanning, handleTick, enrichWithFloat } from './engine/scanner.js';
-import { checkNewGainers } from './alerts/gainers-tracker.js';
-import { startPolling }    from './alerts/bot-commands.js';
+import { checkNewGainers }    from './alerts/gainers-tracker.js';
+import { startPolling }       from './alerts/bot-commands.js';
+import { startNewsAggregator } from './alerts/news-aggregator.js';
 
 const ema200Cache = new Map();
 
@@ -244,4 +245,5 @@ server.listen(PORT, () => {
     }
   });
   startPolling(getScanners, ema200Cache, provider);
+  startNewsAggregator(getScanners, provider);
 });
