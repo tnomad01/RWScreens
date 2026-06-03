@@ -53,12 +53,14 @@ function formatGainerAlert(row, phase) {
     ? `Pre-Mkt Vol: ${pmPct}% of avg daily  |  Float: ${fmtFloat(row.float)}`
     : `Volume: ${fmtVol(row.volume)}  |  Float: ${fmtFloat(row.float)}`;
 
+  const rvolLabel = phase === 'premarket' ? 'Rel Vol (pre-mkt)' : 'Rel Vol';
+
   return [
     header,
     '',
     `Price: $${fmtPrice(row.price)}  |  Change: ${fmtPct(row.changeFromClosePct)}`,
     volumeLine,
-    `Rel Vol: ${fmtX(row.relVolDaily)}  |  Gap: ${fmtPct(row.gapPct)}`,
+    `${rvolLabel}: ${fmtX(row.relVolDaily)}  |  Gap: ${fmtPct(row.gapPct)}`,
   ].join('\n');
 }
 

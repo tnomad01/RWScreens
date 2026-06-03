@@ -24,6 +24,7 @@ import { evalPillars, getNewsFromCache, refreshNewsAsync, topTickers, marketPhas
 import { enrichWithFloat } from '../engine/scanner.js';
 
 let lastUpdateId = 0;
+let lastTop5Key  = null;   // null = first run, always sends full list
 
 // ── Telegram polling ──────────────────────────────────────────────────────────
 
@@ -140,6 +141,15 @@ export async function handle5P(ticker, scanners, ema200Cache, provider) {
 
 export function handleTop5(scanners, ema200Cache) {
   const top = topTickers(scanners, ema200Cache, 5);
+  const currentKey = top.map(e => e.row.symbol).sort().join(',');
+
+  if (lastTop5Key !== null && currentKey === lastTop5Key) {
+    sendMessage('📊 <b>Top Watchlist</b>\n\nNo changes.');
+    return;
+  }
+
+  lastTop5Key = currentKey;
+
   if (top.length === 0) {
     sendMessage('📊 <b>Top Watchlist</b>\n\nNo qualifying tickers (float &lt; 10M) in scanner.');
     return;

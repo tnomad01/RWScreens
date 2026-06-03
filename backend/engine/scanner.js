@@ -25,6 +25,11 @@ const PRICE_MAX      = 30;
 const VOL_MIN        = 100_000;
 const FLOAT_MAX_LOW  = 20_000_000;   // Low Float scanner threshold
 
+// Pre-market volume is typically ~10% of avg daily volume on an average day.
+// Using this as the denominator gives a meaningful RVOL multiplier before open
+// (e.g. 2.5× = trading at 2.5× the typical pre-market rate).
+const PRE_MARKET_TYPICAL_FRACTION = 0.10;
+
 // Running Up trigger thresholds
 const RU_PRICE_ADV_PCT   = 4;     // min % price advance in look-back window
 const RU_REL_VOL_DAILY   = 2.5;   // min daily relative volume
@@ -114,10 +119,11 @@ export async function startScanning() {
         const avgVol = floatData?.avgVolume ?? g.avgDailyVolume ?? g.volume ?? 500_000;
 
         tickerMeta[g.symbol] = {
-          sessionVol:     g.volume,
-          avgDailyVolume: avgVol,
-          prevClose:      g.prevClose,
-          open:           g.open,
+          sessionVol:          g.volume,
+          preMarketSessionVol: g.volume,   // frozen at seed time for pre/post-open context
+          avgDailyVolume:      avgVol,
+          prevClose:           g.prevClose,
+          open:                g.open,
           float,
         };
         highWatermarks[g.symbol] = g.price;
@@ -145,7 +151,9 @@ export function handleTick(msg) {
 
   const price = msg.c || 0;
   const now   = Date.now();
-  meta.sessionVol = msg.av || meta.sessionVol;
+  // Accumulate completed-bar volume rather than replacing — server.js only sends
+  // av on 1m bars, so this safely builds a running session total from seed onwards.
+  if (msg.av) meta.sessionVol += msg.av;
 
   // Track price history for velocity detection
   if (!priceHistory[ticker]) priceHistory[ticker] = [];
@@ -206,11 +214,12 @@ export function injectNewsDiscovery(ticker, quote, floatShares) {
 
   const avgVol = quote.volume || 1;
   tickerMeta[ticker] = {
-    sessionVol:     quote.volume || 0,
-    avgDailyVolume: avgVol,
-    prevClose:      quote.prevClose || quote.price,
-    open:           quote.open      || quote.price,
-    float:          floatShares     || 0,
+    sessionVol:          quote.volume || 0,
+    preMarketSessionVol: quote.volume || 0,
+    avgDailyVolume:      avgVol,
+    prevClose:           quote.prevClose || quote.price,
+    open:                quote.open      || quote.price,
+    float:               floatShares     || 0,
   };
   highWatermarks[ticker] = quote.price;
 
@@ -409,9 +418,10 @@ function _evaluateRunningUp(ticker, price, meta, now) {
  *           =  sessionVol × 390  /  (avgDailyVolume × minutesSinceOpen)
  *
  *   A stock trading 3× its normal rate at this time of day returns 3.0.
- *   Outside regular hours (minutesSinceOpen = 0) falls back to the raw
- *   ratio (sessionVol / avgDailyVolume) so pre-market values are still
- *   visible but not pace-adjusted.
+ *
+ *   Pre-market: compare against PRE_MARKET_TYPICAL_FRACTION of avg daily
+ *   (typically ~10% of daily volume trades before the open), giving a
+ *   meaningful multiplier — 2.5× means 2.5× the typical pre-market rate.
  */
 function _calcRelVolDaily(meta) {
   const adv = meta.avgDailyVolume || 0;
@@ -421,8 +431,8 @@ function _calcRelVolDaily(meta) {
     // Same-time-of-day pace: how many times the expected volume has traded
     return (meta.sessionVol * 390) / (adv * minutesSinceOpen);
   }
-  // Outside market hours — raw ratio (pre-market or post-market)
-  return meta.sessionVol / adv;
+  // Pre-market: express as multiple of typical pre-market volume
+  return meta.sessionVol / (adv * PRE_MARKET_TYPICAL_FRACTION);
 }
 
 function _calc5minRelVol(meta) {
@@ -469,7 +479,7 @@ async function _seedMockData() {
 
   const time = _etTimeStr(Date.now());
   for (const r of mockRows) {
-    tickerMeta[r.symbol] = { sessionVol: r.volume, avgDailyVolume: r.avgDailyVolume, prevClose: r.prevClose, open: r.open, float: floatMap[r.symbol] || 0 };
+    tickerMeta[r.symbol] = { sessionVol: r.volume, preMarketSessionVol: r.volume, avgDailyVolume: r.avgDailyVolume, prevClose: r.prevClose, open: r.open, float: floatMap[r.symbol] || 0 };
     highWatermarks[r.symbol] = r.price;
     _updateRow(r.symbol, _buildRow(time, r, floatMap[r.symbol] || 0, r.avgDailyVolume));
   }

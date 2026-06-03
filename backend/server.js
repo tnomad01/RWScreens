@@ -210,7 +210,9 @@ provider.onMessage((msg) => {
       // Feed scanner engine with bar data (for rel-vol tracking)
       if (ind.ema200 !== null) ema200Cache.set(msg.ticker, ind.ema200);
       if (msg.timeframe === '10s' || msg.timeframe === '1m') {
-        handleTick({ sym: msg.ticker, c: bar.close, av: bar.volume });
+        // Only pass volume on completed 1m bars — 10s bars are in-progress
+        // and their partial volume would replace (and corrupt) the cumulative total.
+        handleTick({ sym: msg.ticker, c: bar.close, av: msg.timeframe === '1m' ? bar.volume : 0 });
         if (msg.timeframe === '1m') checkNewGainers(getScanners());
       }
 
