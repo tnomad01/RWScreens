@@ -1,7 +1,23 @@
-// js/pillars.js
-// Stock Quote & 5 Pillars center panel.
-// Renders dynamic header, news feed, key stats, and 5 Pillars scoring.
-// Depends on: window.liveData, window.events (from engine.js)
+// ─────────────────────────────────────────────────────────────────────────────
+// frontend/js/pillars.js  ·  v1.1
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Center panel — stock quote header, recent news feed, key stats,
+//           and Ross Cameron's 5 Pillars scoring. Mirrors the evalPillars()
+//           logic from backend/alerts/pillars-tracker.js for live browser use.
+//
+// Pillars:  lowFloat      float < 10M shares
+//           highRelVol    daily RVOL > 5×
+//           catalyst      news in the last 24h (from /api/news)
+//           momentum      Running Up 5m RVOL ≥ 3× (or gap > 10%)
+//           strongDaily   price above 200-day EMA
+//           potential     pre-market vol > 25% of avg daily (bonus indicator)
+//
+// Events:   symbolSelected → fetch quote + news, re-render panel
+//           quoteLoaded, newsLoaded → render respective section
+//           quoteUpdated  → live price update in header only
+//
+// Depends:  frontend/js/engine.js  (window.liveData, window.events)
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── 5 Pillars scoring ─────────────────────────────────────────────────────────
 

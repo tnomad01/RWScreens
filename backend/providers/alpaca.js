@@ -1,21 +1,28 @@
-// providers/alpaca.js
-// Alpaca Markets data provider — free IEX feed.
-// Implements the standard provider interface used by server.js and scanner.js.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/providers/alpaca.js  ·  v1.1
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Alpaca Markets data provider (free IEX feed). Default provider.
+//           Connects to Alpaca WebSocket for real-time trades and minute/updated
+//           bars. Seeds scanner from Trade Ideas SQLite DB if TRADE_IDEAS_DB_PATH
+//           is set, falling back to Alpaca REST top-gainers.
+//
+// Config:   ALPACA_API_KEY, ALPACA_SECRET_KEY  in .env
+//           TRADE_IDEAS_DB_PATH  optional — enables Trade Ideas seeding
+//
+// Provider interface (shared with polygon.js):
+//   connect(credentials), disconnect()
+//   subscribe(tickers), unsubscribe(tickers)
+//   onMessage(handler)        → normalized { type, ticker, ... } messages
+//   fetchRawBars(ticker, tf)  → [{ time, open, high, low, close, volume }]
+//   fetchQuote(ticker)        → { ticker, price, prevClose, change, changePct,
+//                                open, gapPct, volume, relVolDaily, ... }
+//   fetchNews(ticker, limit)  → [{ id, title, publishedAt, url, source }]
+//   fetchGainers()            → normalized scanner seed rows
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { getRecentTickers } from '../engine/trade_ideas_db.js';
 import YahooFinance from 'yahoo-finance2';
 const _yf = new YahooFinance();
-//
-// Provider interface (both providers implement these):
-//   connect(credentials)
-//   disconnect()
-//   subscribe(tickers)
-//   unsubscribe(tickers)
-//   onMessage(handler)          — normalized { type, ticker, ... } messages
-//   fetchRawBars(ticker, tf)    — [{time, open, high, low, close, volume}]
-//   fetchQuote(ticker)          — normalized quote object
-//   fetchNews(ticker, limit)    — [{id, title, publishedAt, url, source}]
-//   fetchGainers()              — normalized scanner seed rows
 
 import { WebSocket } from 'ws';
 

@@ -1,7 +1,15 @@
-// alerts/gainers-tracker.js
-// Detects entries to the Top Gainers (dayTrade) scanner and sends Telegram alerts.
-// Alerts on initial seed AND on new entries. Cooldown prevents re-alerting
-// the same ticker while it stays in the list.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/alerts/gainers-tracker.js  ·  v1.1
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Detects new entries in the dayTrade (Top Gainers) scanner and
+//           sends a Telegram alert for each one. Called on every 1m bar tick
+//           from server.js. A 30-minute per-ticker cooldown prevents duplicate
+//           alerts while a ticker stays in the list.
+//
+// Exports:  checkNewGainers(scanners)
+//
+// Depends:  alerts/telegram.js
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { sendMessage } from './telegram.js';
 

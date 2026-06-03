@@ -1,8 +1,12 @@
-// providers/polygon.js
-// Polygon.io data provider — paid plans recommended for full access.
-// Implements the same provider interface as alpaca.js.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/providers/polygon.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Polygon.io data provider (alternate to Alpaca). Paid plans
+//           recommended for full real-time access. Implements the same
+//           provider interface as alpaca.js — swap with DATA_PROVIDER=polygon.
 //
-// Requires: POLYGON_API_KEY in .env
+// Config:   POLYGON_API_KEY  in .env
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { WebSocket } from 'ws';
 

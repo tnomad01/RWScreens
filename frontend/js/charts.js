@@ -1,7 +1,20 @@
-// js/charts.js
-// TradingView Lightweight Charts — chart registry, series factory,
-// symbolSelected handler, liveTick handler, and crosshair synchronization.
-// Depends on: window.liveData, window.events (from engine.js)
+// ─────────────────────────────────────────────────────────────────────────────
+// frontend/js/charts.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Four TradingView Lightweight Charts instances with VWAP, SD bands,
+//           EMA 9/20/200 series, and live tick updates. Crosshair is synced
+//           across all charts with intradayMomentum as the master.
+//
+// Charts:   intradayMomentum   1m  (master crosshair)
+//           scalpingFast       10s
+//           dailyContext       1D
+//           microScalping      10s
+//
+// Events:   symbolSelected → load bars for new ticker
+//           liveTick       → append/update latest candle + indicators
+//
+// Depends:  frontend/js/engine.js  (fetchBars, window.events)
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { fetchBars } from './engine.js';
 

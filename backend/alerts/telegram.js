@@ -1,6 +1,16 @@
-// alerts/telegram.js
-// Thin Telegram Bot API client using Node's built-in https — no npm dependency.
-// No-ops silently if TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID are unset.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/alerts/telegram.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Thin Telegram Bot API client (sendMessage only). Uses Node's
+//           built-in https — no npm dependency. No-ops silently when
+//           TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID are not set in .env,
+//           so the rest of the system works fine without a bot configured.
+//
+// Config:   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID  in .env
+//
+// Exports:  sendMessage(htmlText)
+//           _overrideSendMessage(fn), _restoreSendMessage()  — test hooks
+// ─────────────────────────────────────────────────────────────────────────────
 
 import https from 'https';
 

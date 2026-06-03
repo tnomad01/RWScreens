@@ -1,11 +1,22 @@
-// engine/scanner.js
-// Four scanners matching Warrior Trading layout:
-//   dayTrade     → "Top Gainers [window] (Online)"          — sorted by Change%
-//   highMomentum → "Small Cap – High of Day Momentum"        — streaming alert feed
-//   lowFloat     → "Low Float Top Gainers [window] (Online)" — derived from dayTrade ∪ highMomentum, float < 20M
-//   runningUp    → "Running Up (Online)"                     — velocity-based alert feed, 7 columns
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/engine/scanner.js  ·  v1.3
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Four live scanner feeds matching the Warrior Trading dashboard.
+//           Seeds from provider.fetchGainers() on startup; updates on every
+//           bar tick via handleTick(). News-discovered tickers are injected
+//           via injectNewsDiscovery() without needing a full seed cycle.
 //
-// Float data is fetched from Finviz and cached for the session.
+// Scanners: dayTrade      top gainers sorted by Change%  (max 20 rows)
+//           highMomentum  new-intraday-high alert feed   (max 50 rows)
+//           lowFloat      dayTrade ∪ highMomentum, float < 20M  (max 20 rows)
+//           runningUp     velocity + volume acceleration feed   (max 50 rows)
+//
+// Exports:  init(options), getScanners(), startScanning()
+//           handleTick(msg), enrichWithFloat(ticker)
+//           injectNewsDiscovery(ticker, quote, floatShares)
+//
+// Depends:  engine/float.js
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { getFloat, batchGetFloats } from './float.js';
 

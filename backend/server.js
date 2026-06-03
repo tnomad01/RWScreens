@@ -1,7 +1,25 @@
-// server.js
-// Express HTTP + WebSocket server.
-// Selects the active data provider from DATA_PROVIDER env var (alpaca | polygon).
-// All provider-specific code lives in providers/alpaca.js and providers/polygon.js.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/server.js  ·  v1.4
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Express HTTP + WebSocket server. Entry point for the backend.
+//           Wires together the data provider, scanner engine, and all alert
+//           services. Selects provider via DATA_PROVIDER env var (alpaca|polygon).
+//
+// REST API: GET /api/bars        OHLCV + VWAP/EMA history
+//           GET /api/quote       live quote + float enrichment
+//           GET /api/news        recent headlines for a ticker
+//           GET /api/scanners    current scanner snapshot (page load)
+//           GET /api/provider    active provider name
+//           GET /api/scanner-debug  Trade Ideas seed diagnostics
+//
+// WS msgs:  scanner, tick, quote, provider  (browser ← server)
+//           subscribe, unsubscribe          (browser → server)
+//
+// Modules:  providers/alpaca.js | providers/polygon.js
+//           engine/scanner.js, engine/vwap.js
+//           alerts/gainers-tracker.js, alerts/bot-commands.js
+//           alerts/news-aggregator.js, alerts/news-watcher.js
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { config as dotenvConfig } from 'dotenv';
 import path       from 'path';

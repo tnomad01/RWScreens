@@ -1,6 +1,22 @@
-// alerts/bot-commands.js
-// Polls Telegram for bot commands and handles /5P [ticker] queries.
-// Uses Node's built-in https — no npm dependency.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/alerts/bot-commands.js  ·  v1.3
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Telegram bot command handler and scheduled alert dispatcher.
+//           Polls Telegram getUpdates every 2 seconds for incoming commands.
+//           Also fires a scheduled top-5 watchlist summary every 10 minutes
+//           during market hours (09:30–16:00 ET).
+//
+// Commands: /5P <TICKER>   evaluate Ross's 5 Pillars for any ticker;
+//                          falls back to a live provider quote if the ticker
+//                          is not currently in the scanner session
+//           /top5 | /top   top 5 low-float tickers ranked by pillar score + RVOL
+//
+// Exports:  startPolling(getScanners, ema200Cache, provider)
+//           handle5P(ticker, scanners, ema200Cache, provider)  async
+//           _processUpdate(update, scanners, ema200Cache, provider)  — test hook
+//
+// Depends:  alerts/telegram.js, alerts/pillars-tracker.js, engine/scanner.js
+// ─────────────────────────────────────────────────────────────────────────────
 
 import https from 'https';
 import { sendMessage } from './telegram.js';

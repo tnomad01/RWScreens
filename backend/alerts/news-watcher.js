@@ -1,9 +1,27 @@
-// alerts/news-watcher.js
-// Proactive discovery: polls trusted news sources and X handles for new tickers,
-// checks float + price + momentum, and injects qualifying ones into the scanner.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/alerts/news-watcher.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Proactive ticker discovery. Polls trusted news APIs and X handles
+//           every 5 minutes looking for tickers NOT yet in the scanner. When a
+//           new ticker is found, its float and live quote are checked against
+//           the injection gate; qualifying tickers are added to the scanner
+//           session automatically and a Telegram alert is sent.
 //
-// Sources are configured in backend/config/news-sources.json and reloaded hourly
-// so new entries take effect without a server restart.
+// Gate:     float > 0 && < 10M shares
+//           price $0.50 – $30
+//           |changePct| >= 5%
+//
+// Sources:  Defined in backend/config/news-sources.json (hot-reloads hourly).
+//           Supported channels: marketaux_trending, stocktwits_trending, x_grok
+//
+// Config:   XAI_API_KEY_1, XAI_API_KEY_2   for x_grok channel
+//           Per-source envKey fields in news-sources.json reference env var names
+//
+// Exports:  startNewsWatcher(getScanners, provider)
+//
+// Depends:  engine/scanner.js  (enrichWithFloat, injectNewsDiscovery)
+//           alerts/telegram.js
+// ─────────────────────────────────────────────────────────────────────────────
 
 import fs   from 'fs';
 import path from 'path';

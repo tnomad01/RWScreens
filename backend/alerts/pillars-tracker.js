@@ -1,6 +1,24 @@
-// alerts/pillars-tracker.js
-// Shared utilities for 5 Pillars evaluation and news caching.
-// Used by bot-commands.js for the /5P command handler.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/alerts/pillars-tracker.js  ·  v1.2
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Shared utilities for Ross Cameron's 5 Pillars evaluation and the
+//           news result cache shared between the aggregator and bot commands.
+//           evalPillars() mirrors the frontend scoring logic in pillars.js.
+//
+// Pillars:  lowFloat      float > 0 and < 10M shares
+//           highRelVol    relative daily volume > 5×
+//           catalyst      news confirmed by news-aggregator in the last N min
+//           momentum      Running Up 5m RVOL ≥ 3× (or gap > 10% at open)
+//           strongDaily   current price above 200-day EMA
+//           potential     pre-market volume > 25% of avg daily (bonus signal)
+//
+// Exports:  newsCache  (Map — written by news-aggregator, read by bot-commands)
+//           getNewsFromCache(ticker), refreshNewsAsync(ticker, provider)
+//           evalPillars(row, ruRow, ema200, hasNews) → pillar flags object
+//           topTickers(scanners, ema200Cache, n)     → ranked ticker list
+//
+// Config:   TELEGRAM_NEWS_CACHE_MIN  cache TTL in minutes (default 5)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const NEWS_TTL_MS = (parseInt(process.env.TELEGRAM_NEWS_CACHE_MIN || '5', 10)) * 60_000;
 

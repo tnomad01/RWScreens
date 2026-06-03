@@ -1,9 +1,17 @@
-// engine/float.js
-// Fetches share float (and avg volume) with a two-source fallback chain:
-//   1. Finviz  — primary; fast HTML scrape, works for most NYSE/NASDAQ stocks
-//   2. Yahoo Finance — fallback via yahoo-finance2 (already installed, no extra key)
-// ETFs return null from both sources and are naturally excluded.
-// Results cached in memory for the session — float barely changes day to day.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/engine/float.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Share float lookup with a two-source fallback chain:
+//             1. Finviz  — primary; fast HTML scrape (300 ms rate-limit guard)
+//             2. Yahoo Finance — fallback via yahoo-finance2 npm package
+//           ETFs return null from both and are naturally excluded.
+//           Results are session-cached — float barely changes intraday.
+//
+// Exports:  getFloat(ticker)        async → { float, avgVolume, marketCap } | null
+//           batchGetFloats(tickers) async → { TICKER: result } map
+//           getCached(ticker)       sync  → cached result or null
+//           clearCache()
+// ─────────────────────────────────────────────────────────────────────────────
 
 import YahooFinance from 'yahoo-finance2';
 

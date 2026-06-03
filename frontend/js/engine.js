@@ -1,6 +1,21 @@
-// js/engine.js
-// Global liveData object, EventTarget event bus, and WebSocket client.
-// All other modules import from window.liveData and window.events.
+// ─────────────────────────────────────────────────────────────────────────────
+// frontend/js/engine.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Foundation module. Owns the global state object (window.liveData),
+//           the EventTarget event bus (window.events), and the WebSocket client
+//           that connects to the backend. All other frontend modules subscribe
+//           to events rather than calling engine.js directly.
+//
+// Events fired:
+//   dataUpdated      scanner snapshot refreshed  (scanners.js)
+//   liveTick         new OHLCV bar arrived        (charts.js)
+//   quoteLoaded      REST quote fetch completed   (pillars.js)
+//   newsLoaded       REST news fetch completed    (pillars.js)
+//   quoteUpdated     live trade price update      (pillars.js)
+//   symbolSelected   user clicked a ticker row    (charts.js, scanners.js, pillars.js)
+//
+// Exports:  fetchBars(ticker, tf), fetchScanners(), selectSymbol(ticker)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const WS_PORT = 3000;
 const WS_URL  = `ws://${location.hostname}:${WS_PORT}`;

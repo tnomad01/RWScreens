@@ -1,7 +1,14 @@
-// test/harness.js
-// Self-contained test harness for the Telegram bot alert service.
-// Run: node test/harness.js
-// Exits 0 on full pass, 1 on any failure.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/test/harness.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Self-contained test harness for alert services.
+//           Covers: Telegram send, gainers-tracker deduplication + cooldown,
+//           5 Pillars evaluation logic, and /5P + /top5 bot command handlers.
+//           Does not require a live provider or browser — uses mock scanners.
+//
+// Run:      node test/harness.js
+// Exit:     0 = all pass,  1 = any failure
+// ─────────────────────────────────────────────────────────────────────────────
 
 import path from 'path';
 import { fileURLToPath } from 'url';

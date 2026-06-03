@@ -1,8 +1,26 @@
-// alerts/news-aggregator.js
-// Polls multiple news sources every 5 minutes for all seeded tickers.
-// Phase 1 sources (free, no key): provider, Grok (batched), EDGAR, Yahoo Finance, StockTwits, Finviz.
-// Phase 2 sources (free, API key, daily quota): Alpha Vantage, Marketaux, NewsAPI.
-// Writes directly into newsCache from pillars-tracker.js.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/alerts/news-aggregator.js  ·  v1.2
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Polls 9 news sources every 5 minutes for every ticker currently
+//           tracked in the scanner. Writes a { hasNews, cachedAt } result to
+//           newsCache (in pillars-tracker.js) which the /5P command reads to
+//           evaluate the Catalyst pillar.
+//
+// Sources:  Phase 1 — free, no key required:
+//             provider (Alpaca/Polygon news), Grok live search (batched),
+//             EDGAR 8-K same-day, Yahoo Finance, StockTwits (links only), Finviz
+//           Phase 2 — free tier API keys, daily quota protected:
+//             Alpha Vantage NEWS_SENTIMENT, Marketaux per-ticker, NewsAPI
+//
+// Config:   XAI_API_KEY_1, XAI_API_KEY_2        xAI key rotation
+//           ALPHA_VANTAGE_API_KEY                Phase 2
+//           MARKETAUX_API_KEY                    Phase 2
+//           NEWS_API_KEY                         Phase 2
+//
+// Exports:  startNewsAggregator(getScanners, provider)
+//
+// Depends:  alerts/pillars-tracker.js  (newsCache)
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { newsCache } from './pillars-tracker.js';
 

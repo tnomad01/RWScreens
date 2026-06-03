@@ -1,9 +1,17 @@
-// js/scanners.js
-// Four scanner panels matching Warrior Trading layout:
-//   Scanner 1: Top Gainers            — sorted by Change%, 5-min window header
-//   Scanner 2: Small Cap High of Day  — streaming momentum alert feed, prepend newest
-//   Scanner 3: Low Float Top Gainers  — sorted by Change%, derived from scanners 1+2, float-filtered
-//   Scanner 4: Running Up             — velocity alert feed, 7 columns, prepend newest
+// ─────────────────────────────────────────────────────────────────────────────
+// frontend/js/scanners.js  ·  v1.1
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Renders and updates the four left-column scanner panels.
+//           Listens to the 'dataUpdated' event from engine.js and re-renders
+//           only changed rows. Clicking a row fires 'symbolSelected'.
+//
+// Panels:   1. Top Gainers (dayTrade)       sorted by Change%, 5-min rolling header
+//           2. Small Cap High of Day        streaming new-high alert feed, prepend newest
+//           3. Low Float Top Gainers        Change%-sorted, derived from panels 1+2
+//           4. Running Up                   velocity alert feed, 7 columns
+//
+// Depends:  frontend/js/engine.js  (fetchScanners, window.events)
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { fetchScanners } from './engine.js';
 

@@ -1,10 +1,16 @@
-// engine/trade_ideas_db.js
-// Reads tickers from the stock-screening-mvp SQLite DB (Trade Ideas scraper).
-// Returns the most-appeared tickers from the most recent capture run within
-// the last N hours — used as a watchlist for scanner seeding.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/engine/trade_ideas_db.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Optional bridge to the stock-screening-mvp Trade Ideas scraper.
+//           Reads the most-frequently-seen tickers from the last LOOKBACK_H
+//           hours of the scraper's SQLite database and returns them as a
+//           seed list for the scanner. Silently no-ops if TRADE_IDEAS_DB_PATH
+//           is unset or the file is missing (scraper not running, market closed).
 //
-// Opt-in via TRADE_IDEAS_DB_PATH in .env.  No-ops silently if the path is
-// unset or the file is unavailable (scraper not running, market closed, etc.).
+// Config:   TRADE_IDEAS_DB_PATH  — absolute path to stock_screen.db in .env
+//
+// Exports:  getRecentTickers(limit?)  → [{ ticker, pctGain }]
+// ─────────────────────────────────────────────────────────────────────────────
 
 import Database from 'better-sqlite3';
 import { existsSync } from 'fs';

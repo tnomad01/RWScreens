@@ -1,7 +1,14 @@
-// engine/vwap.js
-// Stateful per-ticker VWAP, ±1/±2 SD bands, and 9/20/200 EMA calculations.
-// VWAP resets at 09:30 ET each session. EMAs persist across sessions.
-// Call updateBar(ticker, bar) for each new OHLCV bar — returns computed indicators.
+// ─────────────────────────────────────────────────────────────────────────────
+// backend/engine/vwap.js  ·  v1.0
+// ─────────────────────────────────────────────────────────────────────────────
+// Purpose:  Stateful per-ticker VWAP, ±1/±2 standard-deviation bands, and
+//           9/20/200-period EMA calculations. VWAP state resets at 09:30 ET
+//           each session; EMAs are cumulative and persist across sessions.
+//
+// Exports:  updateBar(ticker, bar)         → { vwap, vwapPlus1/2, vwapMinus1/2, ema9, ema20, ema200, time }
+//           computeHistory(ticker, bars)   → full indicator series for REST /api/bars
+//           computeDailyEma200(bars)       → single EMA-200 value for the 200-day series
+// ─────────────────────────────────────────────────────────────────────────────
 
 const ET_OPEN_HOUR   = 9;
 const ET_OPEN_MINUTE = 30;
