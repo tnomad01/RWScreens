@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// backend/alerts/bot-commands.js  ·  v1.3
+// backend/alerts/bot-commands.js  ·  v1.4
 // ─────────────────────────────────────────────────────────────────────────────
 // Purpose:  Telegram bot command handler and scheduled alert dispatcher.
 //           Polls Telegram getUpdates every 2 seconds for incoming commands.
@@ -20,7 +20,7 @@
 
 import https from 'https';
 import { sendMessage } from './telegram.js';
-import { evalPillars, getNewsFromCache, refreshNewsAsync, topTickers } from './pillars-tracker.js';
+import { evalPillars, getNewsFromCache, refreshNewsAsync, topTickers, marketPhase } from './pillars-tracker.js';
 import { enrichWithFloat } from '../engine/scanner.js';
 
 let lastUpdateId = 0;
@@ -61,9 +61,9 @@ export function startPolling(getScanners, ema200Cache, provider) {
 
   setInterval(poll, 2000);
 
-  // Scheduled top-5 summary every 10 minutes during market hours
+  // Scheduled top-5 summary every 10 minutes during the regular session
   setInterval(() => {
-    if (_isMarketHours()) handleTop5(getScanners(), ema200Cache);
+    if (marketPhase() === 'open') handleTop5(getScanners(), ema200Cache);
   }, 10 * 60_000);
 
   console.log('[telegram] Bot command polling started (/5P, /top5)');
@@ -129,10 +129,11 @@ export async function handle5P(ticker, scanners, ema200Cache, provider) {
     if (provider) refreshNewsAsync(ticker, provider);
   }
 
-  const pillars = evalPillars(row, ruRow, ema200, hasNews);
+  const phase   = marketPhase();
+  const pillars = evalPillars(row, ruRow, ema200, hasNews, phase);
   const score   = Object.values(pillars).filter(Boolean).length;
 
-  sendMessage(format5P(ticker, row, ruRow, pillars, score, ema200, liveMode));
+  sendMessage(format5P(ticker, row, ruRow, pillars, score, ema200, liveMode, phase));
 }
 
 // ── /top5 handler ─────────────────────────────────────────────────────────────
@@ -146,12 +147,6 @@ export function handleTop5(scanners, ema200Cache) {
   sendMessage(formatTop5(top));
 }
 
-function _isMarketHours() {
-  const et   = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
-  const d    = new Date(et);
-  const mins = d.getHours() * 60 + d.getMinutes();
-  return mins >= 9 * 60 + 30 && mins < 16 * 60;
-}
 
 function formatTop5(entries) {
   const etTime = new Date().toLocaleTimeString('en-US', {
@@ -194,7 +189,7 @@ function fmtFloat(v) {
   return String(v);
 }
 
-function format5P(ticker, row, ruRow, pillars, score, ema200, liveMode = false) {
+function format5P(ticker, row, ruRow, pillars, score, ema200, liveMode = false, phase = 'open') {
   const momentumNote = ruRow
     ? `5m RVOL ${fmtNum(ruRow.relVol5minPct, 1)}× (Δ${fmtNum(ruRow.delta5minVsDaily, 1)})`
     : `Gap ${(row.gapPct ?? 0) > 0 ? '+' : ''}${fmtNum(row.gapPct)}%`;
@@ -209,9 +204,12 @@ function format5P(ticker, row, ruRow, pillars, score, ema200, liveMode = false) 
       ? `🟡 <b>WATCH — ${score}/5 Pillars</b>`
       : `⚪ <b>NO SETUP — ${score}/5 Pillars</b>`;
 
-  const potentialLine = pillars.potential
-    ? `\n🔍 <b>Potential</b>: Pre-mkt vol ${fmtNum((row.preMarketVolPct ?? 0) * 100, 0)}% of avg daily — worth watching`
-    : '';
+  const pmPct = Math.round((row.preMarketVolPct ?? 0) * 100);
+  const potentialLine = phase === 'premarket' && pmPct > 25
+    ? `\n🔍 <b>Potential</b>: Pre-mkt vol ${pmPct}% of avg daily — elevated interest before open`
+    : phase !== 'premarket' && pmPct > 25
+      ? `\n📌 Pre-open vol was elevated (${pmPct}%) — RVOL now ${fmtNum(row.relVolDaily, 1)}×`
+      : '';
 
   const header = liveMode
     ? `📊 <b>${ticker}</b> — 5 Pillars <i>(live lookup)</i>`

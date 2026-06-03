@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// backend/alerts/pillars-tracker.js  ·  v1.2
+// backend/alerts/pillars-tracker.js  ·  v1.3
 // ─────────────────────────────────────────────────────────────────────────────
 // Purpose:  Shared utilities for Ross Cameron's 5 Pillars evaluation and the
 //           news result cache shared between the aggregator and bot commands.
@@ -21,6 +21,23 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NEWS_TTL_MS = (parseInt(process.env.TELEGRAM_NEWS_CACHE_MIN || '5', 10)) * 60_000;
+
+// ── Market phase ──────────────────────────────────────────────────────────────
+
+/**
+ * Returns the current US market phase based on ET clock.
+ * 'premarket'  — before 09:30 ET
+ * 'open'       — 09:30–16:00 ET  (regular session)
+ * 'afterhours' — after 16:00 ET
+ */
+export function marketPhase() {
+  const et   = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const d    = new Date(et);
+  const mins = d.getHours() * 60 + d.getMinutes();
+  if (mins < 9 * 60 + 30) return 'premarket';
+  if (mins < 16 * 60)     return 'open';
+  return 'afterhours';
+}
 
 // newsCache: ticker → { hasNews: bool, cachedAt: ms }
 export const newsCache = new Map();
@@ -76,16 +93,16 @@ export function topTickers(scanners, ema200Cache, n = 5) {
   return results.slice(0, n);
 }
 
-export function evalPillars(row, ruRow, ema200, hasNews) {
+// phase defaults to current real-time phase when called without an explicit arg.
+export function evalPillars(row, ruRow, ema200, hasNews, phase = marketPhase()) {
   const momentumPass = ruRow
     ? ((ruRow.relVol5minPct ?? 0) >= 3.0 && (ruRow.delta5minVsDaily ?? 0) >= 0.5)
     : (row.gapPct ?? 0) > 10;
 
-  // Potential trigger: pre-market volume > 25% of average daily volume.
-  // Captured at seed time (preMarketVolPct is frozen, not overwritten by live ticks).
-  // Signals elevated interest before the open — warrants further investigation
-  // once the session starts and pace-adjusted RVOL can be properly evaluated.
-  const potential = (row.preMarketVolPct ?? 0) > 0.25;
+  // Potential: pre-market volume > 25% of average daily volume.
+  // Meaningful only before 09:30 — after open the signal has already triggered
+  // and live RVOL (highRelVol pillar) is the authoritative volume measure.
+  const potential = phase === 'premarket' && (row.preMarketVolPct ?? 0) > 0.25;
 
   return {
     lowFloat:    row.float > 0 && row.float < 10_000_000,
